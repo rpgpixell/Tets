@@ -697,8 +697,35 @@
 
 
   <!-- ═══════════════════════════════
-       PvP — Оверлей поиска соперника
+       PvP — Главная страница
        ═══════════════════════════════ -->
+  <div id="pvpPage" class="pvp-page hidden">
+    <div class="pvp-page-header">
+      <button class="pvp-page-close" onclick="closePvpPage()">✕</button>
+      <span class="pvp-page-title">⚔️ PvP АРЕНА</span>
+      <span class="pvp-my-rating" id="pvpMyRating">★ —</span>
+    </div>
+
+    <!-- Кнопка поиска -->
+    <div class="pvp-find-btn-wrap">
+      <button class="pvp-find-btn" id="pvpFindBtn" onclick="pvpStartFinding()">
+        <span style="font-size:28px;">⚔️</span>
+        <span>Найти противника</span>
+        <span style="font-size:11px;color:#c890ff;" id="pvpFindCp"></span>
+      </button>
+    </div>
+
+    <!-- Табы -->
+    <div class="pvp-page-tabs">
+      <button class="pvp-page-tab active" id="pvpTabRating"  onclick="switchPvpTab('rating')">Рейтинг</button>
+      <button class="pvp-page-tab"        id="pvpTabHistory" onclick="switchPvpTab('history')">История</button>
+    </div>
+    <div class="pvp-page-body" id="pvpPageBody">
+      <div style="text-align:center;color:#445;padding:30px;">Загрузка...</div>
+    </div>
+  </div>
+
+  <!-- Поиск соперника (оверлей поверх pvpPage) -->
   <div id="pvpSearchOverlay" class="pvp-search-overlay hidden">
     <div class="pvp-search-box">
       <div class="pvp-search-title">⚔️ ПОИСК СОПЕРНИКА</div>

@@ -2068,7 +2068,7 @@ function _pvpDoJoinQueue() {
     if (el) el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
     if (_pvpSearchSeconds >= 60) clearInterval(_pvpSearchTimer);
   }, 1000);
-  PvpClient.joinQueue(calcCP());
+  PvpClient.joinQueue(calcCP(), G.stats, G.maxHp);
 }
 
 function _pvpConnectHandlers() {

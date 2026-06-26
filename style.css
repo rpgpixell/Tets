@@ -1653,3 +1653,78 @@ html, body {
   color: #aaa; cursor: pointer;
 }
 .pvp-result-close:active { color: #fff; }
+
+/* ══════════════════════════════════
+   PvP — Главная страница
+   ══════════════════════════════════ */
+.pvp-page {
+  position: fixed; inset: 0; z-index: 290;
+  background: #080814;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.pvp-page.hidden { display: none; }
+
+.pvp-page-header {
+  display: flex; align-items: center;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid rgba(160,100,255,0.2);
+  flex-shrink: 0;
+}
+.pvp-page-close  { background: none; border: none; color: #556; font-size: 18px; cursor: pointer; margin-right: 10px; line-height: 1; }
+.pvp-page-close:active { color: #fff; }
+.pvp-page-title  { flex: 1; font-size: 13px; font-weight: bold; color: #a064ff; font-family: 'Courier New', monospace; letter-spacing: 1px; }
+.pvp-my-rating   { font-size: 12px; color: #a78bfa; font-family: 'Courier New', monospace; font-weight: bold; }
+
+.pvp-find-btn-wrap { padding: 14px 14px 10px; flex-shrink: 0; }
+.pvp-find-btn {
+  width: 100%; padding: 14px 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  border-radius: 12px;
+  border: 2px solid rgba(160,100,255,0.6);
+  background: rgba(160,100,255,0.08);
+  font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold;
+  color: #c890ff; cursor: pointer;
+  box-shadow: 0 0 18px rgba(160,100,255,0.15);
+}
+.pvp-find-btn:active { transform: scale(0.97); background: rgba(160,100,255,0.15); }
+.pvp-find-btn.searching {
+  border-color: rgba(160,100,255,0.3);
+  color: #778; cursor: default;
+}
+
+.pvp-page-tabs {
+  display: flex; flex-shrink: 0;
+  border-bottom: 1px solid rgba(160,100,255,0.1);
+}
+.pvp-page-tab {
+  flex: 1; padding: 8px 0; font-size: 11px; font-family: 'Courier New', monospace;
+  background: none; border: none; color: #556; cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.pvp-page-tab.active { color: #a064ff; border-bottom-color: #a064ff; }
+
+.pvp-page-body { flex: 1; overflow-y: auto; padding: 8px 10px 16px; }
+
+/* Строка рейтинга */
+.pvp-rank-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 8px; margin-bottom: 4px;
+  background: rgba(255,255,255,0.03);
+}
+.pvp-rank-row.me { background: rgba(160,100,255,0.1); border: 1px solid rgba(160,100,255,0.3); }
+.pvp-rank-num  { font-size: 11px; color: #445; font-family: 'Courier New', monospace; width: 22px; text-align: center; }
+.pvp-rank-name { flex: 1; font-size: 12px; color: #ccc; font-family: 'Courier New', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pvp-rank-val  { font-size: 12px; color: #a78bfa; font-family: 'Courier New', monospace; font-weight: bold; }
+
+/* Строка истории */
+.pvp-hist-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 8px; margin-bottom: 4px;
+  background: rgba(255,255,255,0.03);
+}
+.pvp-hist-result { font-size: 11px; font-weight: bold; font-family: 'Courier New', monospace; width: 36px; text-align: center; border-radius: 4px; padding: 2px 0; }
+.pvp-hist-result.win  { color: #2ecc71; background: rgba(46,204,113,0.1); }
+.pvp-hist-result.loss { color: #e74c3c; background: rgba(231,76,60,0.1); }
+.pvp-hist-name   { flex: 1; font-size: 11px; color: #aaa; font-family: 'Courier New', monospace; overflow: hidden; text-overflow: ellipsis; }
+.pvp-hist-change { font-size: 11px; font-family: 'Courier New', monospace; font-weight: bold; }

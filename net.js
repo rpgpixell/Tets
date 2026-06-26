@@ -17,7 +17,7 @@
   var API = (function() {
     var url = new URLSearchParams(window.location.search).get('api') || 
               window.ENV_API_URL || 
-              'https://test-production-1fb6.up.railway.app';
+              'https://tets-production-4fdc.up.railway.app';
     return url.replace(/\/$/, '');
   })();
 
@@ -1003,7 +1003,7 @@ SYNC.booted = true;
       _socket.on('pvp_reconnected',       function(d) { _roomId = d.roomId; _yourIdx = d.yourIdx; PVP._fire('reconnected', d); });
       _socket.on('disconnect',            function()  { _authed = false; PVP._fire('disconnected', {}); });
     },
-    joinQueue:   function(cp)      { if (_socket) _socket.emit('pvp_join_queue',  { cp: cp }); },
+    joinQueue:   function(cp, stats, maxHp) { if (_socket) _socket.emit('pvp_join_queue', { cp: cp, stats: stats || {}, maxHp: maxHp || 0 }); },
     cancelQueue: function()        { if (_socket) _socket.emit('pvp_cancel_queue', {}); },
     castSkill:   function(skillId) { if (_socket && _roomId) _socket.emit('pvp_skill',     { roomId: _roomId, skillId: skillId }); },
     surrender:   function()        { if (_socket && _roomId) _socket.emit('pvp_surrender',  { roomId: _roomId }); },
