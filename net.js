@@ -17,7 +17,7 @@
   var API = (function() {
     var url = new URLSearchParams(window.location.search).get('api') || 
               window.ENV_API_URL || 
-              'https://tets-production-4fdc.up.railway.app';
+              'https://test-production-1fb6.up.railway.app';
     return url.replace(/\/$/, '');
   })();
 
@@ -982,13 +982,27 @@ SYNC.booted = true;
         _socket.emit('pvp_auth', { initData: _initData });
         return;
       }
-      _socket = io(apiUrl, { transports: ['websocket','polling'], reconnection: true, reconnectionDelay: 1000 });
+      _socket = io(apiUrl, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1500,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: 20,
+        timeout: 30000,
+      });
 
       _socket.on('connect', function() {
         _authed = false;
         _socket.emit('pvp_auth', { initData: _initData });
       });
-      _socket.on('pvp_authed',            function(d) { _authed = true;  PVP._fire('authed', d); });
+      _socket.on('pvp_authed', function(d) {
+        _authed = true;
+        // Если был активный бой — реконнектимся в комнату
+        if (_roomId) {
+          _socket.emit('pvp_reconnect', { roomId: _roomId });
+        }
+        PVP._fire('authed', d);
+      });
       _socket.on('pvp_error',             function(d) { PVP._fire('error', d); });
       _socket.on('pvp_queued',            function(d) { PVP._fire('queued', d); });
       _socket.on('pvp_timeout',           function(d) { PVP._fire('timeout', d); });
@@ -1003,7 +1017,7 @@ SYNC.booted = true;
       _socket.on('pvp_reconnected',       function(d) { _roomId = d.roomId; _yourIdx = d.yourIdx; PVP._fire('reconnected', d); });
       _socket.on('disconnect',            function()  { _authed = false; PVP._fire('disconnected', {}); });
     },
-    joinQueue:   function(cp, stats, maxHp) { if (_socket) _socket.emit('pvp_join_queue', { cp: cp, stats: stats || {}, maxHp: maxHp || 0 }); },
+    joinQueue:   function(cp)      { if (_socket) _socket.emit('pvp_join_queue',  { cp: cp }); },
     cancelQueue: function()        { if (_socket) _socket.emit('pvp_cancel_queue', {}); },
     castSkill:   function(skillId) { if (_socket && _roomId) _socket.emit('pvp_skill',     { roomId: _roomId, skillId: skillId }); },
     surrender:   function()        { if (_socket && _roomId) _socket.emit('pvp_surrender',  { roomId: _roomId }); },

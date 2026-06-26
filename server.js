@@ -24,7 +24,10 @@ const app    = express();
 const server = http.createServer(app);
 const io     = new Server(server, {
   cors: { origin: '*', methods: ['GET','POST'] },
-  pingTimeout: 20000, pingInterval: 10000,
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  upgradeTimeout: 30000,
+  allowEIO3: true,
 });
 const BOT_USERNAME = process.env.BOT_USERNAME || 'YourBotUsername';
 if (!process.env.BOT_USERNAME) console.warn('⚠️  BOT_USERNAME не задан');
@@ -2514,7 +2517,7 @@ function pvpTickBuffs(f, dt) {
 
 function pvpEffDef(f)  { var d=f.stats.def||5; if(f.buffs.shield)d=Math.floor(d*f.buffs.shield.defMult); if(f.debuffs.cursed)d=Math.floor(d*f.debuffs.cursed.defMult); return d; }
 function pvpEffCrit(f) { var c=f.stats.crit||5; if(f.buffs.critBoost)c+=f.buffs.critBoost.flat; return c; }
-function pvpAtkInterval(f) { var spd=f.stats.atkSpd||1.0; if(f.buffs.haste)spd*=f.buffs.haste.atkSpdMult; return Math.max(0.3, PVP_BASE_ATK_CD/spd); }
+function pvpAtkInterval(f) { var s=PVP_ATK_INTERVAL/(f.stats.atkSpd||1.0); if(f.buffs.haste)s/=f.buffs.haste.atkSpdMult; return Math.max(0.5,s); }
 
 function pvpTick(room) {
   if (room.finished) return;
