@@ -1137,7 +1137,7 @@ app.post('/api/wallet/exchange', async (req, res) => {
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEBAPP_URL = process.env.WEBAPP_URL || 'https://your-domain.railway.app';
-const API_URL = process.env.API_URL || 'https://tets-production-4fdc.up.railway.app';
+const API_URL = process.env.API_URL || 'https://test-production-1fb6.up.railway.app';
 
 let bot = null;
 
@@ -2514,7 +2514,7 @@ function pvpTickBuffs(f, dt) {
 
 function pvpEffDef(f)  { var d=f.stats.def||5; if(f.buffs.shield)d=Math.floor(d*f.buffs.shield.defMult); if(f.debuffs.cursed)d=Math.floor(d*f.debuffs.cursed.defMult); return d; }
 function pvpEffCrit(f) { var c=f.stats.crit||5; if(f.buffs.critBoost)c+=f.buffs.critBoost.flat; return c; }
-function pvpAtkInterval(f) { var s=PVP_ATK_INTERVAL/(f.stats.atkSpd||1.0); if(f.buffs.haste)s/=f.buffs.haste.atkSpdMult; return Math.max(0.5,s); }
+function pvpAtkInterval(f) { var spd=f.stats.atkSpd||1.0; if(f.buffs.haste)spd*=f.buffs.haste.atkSpdMult; return Math.max(0.3, PVP_BASE_ATK_CD/spd); }
 
 function pvpTick(room) {
   if (room.finished) return;
@@ -2636,35 +2636,19 @@ io.on('connection', function(socket) {
       if (!save || !save.data) { socket.emit('pvp_error',{msg:'no_save'}); return; }
       var d = save.data;
       var charId = (d.char&&d.char.id) || d.charId || 'fire';
-
-      // ── Используем актуальные stats с клиента ──
-      // Клиент передаёт recalcStats() результат (с экипировкой и апгрейдами)
-      // Валидация: HP не может быть больше чем base hp * 5 (защита от читов)
-      var clientStats = data.stats || {};
-      var clientMaxHp = data.maxHp || 0;
-      var dbBaseHp = (d.stats && d.stats.hp) || 100;
-      var maxAllowedHp = dbBaseHp * 10; // разрешаем до 10x от базы (экипировка)
-
-      var finalStats = (clientStats.atk && clientMaxHp && clientMaxHp <= maxAllowedHp)
-        ? clientStats
-        : (d.stats || {});
-      var finalMaxHp = (clientMaxHp > 0 && clientMaxHp <= maxAllowedHp)
-        ? clientMaxHp
-        : (d.maxHp || dbBaseHp || 100);
-
       pvpQueue.set(myTgId, {
         tgId: myTgId,
         name: save.firstName || save.username || 'Игрок',
         cp:   data.cp || 0,
         charId,
-        stats:  finalStats,
-        maxHp:  finalMaxHp,
+        stats:  d.stats  || {},
+        maxHp:  d.maxHp  || (d.stats&&d.stats.hp) || 100,
         skills: d.skills || {},
         arenaRating: d.arenaRating || 1000,
         joinedAt: Date.now(),
       });
       socket.emit('pvp_queued', { position: pvpQueue.size });
-      console.log(`🔍 [pvp] ${myTgId} в очереди CP=${data.cp} HP=${finalMaxHp} ATK=${finalStats.atk||'?'}`);
+      console.log(`🔍 [pvp] ${myTgId} в очереди CP=${data.cp}`);
     } catch(e) { socket.emit('pvp_error',{msg:'server_error'}); }
   });
 

@@ -1119,19 +1119,6 @@ var pvpRenderState = {
 };
 
 // Вызывается из game loop
-// Снаряды PvP: { x, y, tx, ty, color, speed, timer }
-var pvpProjectiles = [];
-
-function pvpSpawnProjectile(fromIdx, color) {
-  var SIZE = Math.min(W * 0.38, 160);
-  var gnd  = H * 0.72;
-  var x0 = fromIdx === 0 ? W * 0.12 + SIZE * 0.85 : W - W * 0.12 - SIZE * 0.85;
-  var y0 = gnd - SIZE * 0.45;
-  var x1 = fromIdx === 0 ? W - W * 0.12 - SIZE * 0.5 : W * 0.12 + SIZE * 0.5;
-  var y1 = gnd - SIZE * 0.45;
-  pvpProjectiles.push({ x: x0, y: y0, tx: x1, ty: y1, color: color || '#ffcc00', timer: 0.6 });
-}
-
 function renderPvp(ts) {
   if (!pvpRenderState.active) return;
 
@@ -1147,35 +1134,8 @@ function renderPvp(ts) {
   _pvpDrawBackground();
   _pvpDrawFighter(0, ts, dt);
   _pvpDrawFighter(1, ts, dt);
-  _pvpDrawProjectiles(dt);
   _pvpDrawHpBars();
   _pvpDrawFloatingTexts(dt);
-}
-
-function _pvpDrawProjectiles(dt) {
-  pvpProjectiles = pvpProjectiles.filter(function(p) {
-    p.timer -= dt;
-    if (p.timer <= 0) return false;
-    var progress = 1 - (p.timer / 0.6);
-    var cx = p.x + (p.tx - p.x) * progress;
-    var cy = p.y + (p.ty - p.y) * progress - Math.sin(progress * Math.PI) * 30;
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, p.timer * 3);
-    ctx.shadowColor = p.color; ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 7, 0, Math.PI * 2);
-    ctx.fillStyle = p.color;
-    ctx.fill();
-    // Хвост
-    ctx.beginPath();
-    var tailX = p.x + (p.tx - p.x) * Math.max(0, progress - 0.15);
-    var tailY = p.y + (p.ty - p.y) * Math.max(0, progress - 0.15) - Math.sin(Math.max(0, progress - 0.15) * Math.PI) * 30;
-    ctx.moveTo(tailX, tailY); ctx.lineTo(cx, cy);
-    ctx.strokeStyle = p.color; ctx.lineWidth = 3; ctx.globalAlpha *= 0.4;
-    ctx.stroke();
-    ctx.restore();
-    return true;
-  });
 }
 
 function _pvpDrawBackground() {
@@ -1193,18 +1153,7 @@ function _pvpDrawBackground() {
   ctx.fillStyle = '#1a1a40';
   ctx.fillRect(0, gnd, W, 3);
 
-  // Разделитель посередине (декоративный)
-  ctx.save();
-  ctx.globalAlpha = 0.15;
-  ctx.strokeStyle = '#a78bfa';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([6, 8]);
-  ctx.beginPath();
-  ctx.moveTo(W / 2, H * 0.1);
-  ctx.lineTo(W / 2, gnd);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
+
 }
 
 function _pvpDrawFighter(idx, ts, dt) {
@@ -1274,10 +1223,12 @@ function _pvpDrawBuffIcons(idx, f) {
 function _pvpDrawHpBars() {
   var f0 = pvpRenderState.fighters[0];
   var f1 = pvpRenderState.fighters[1];
-  var barW = W * 0.40, barH = 12;
-  var marginX = W * 0.04;
-  var topY = (HUD_H || 60) + 14;
+  var barW = W * 0.38, barH = 10;
+  var marginX = W * 0.05, topY = 18;
+
+  // HP бар левого (f0)
   _pvpDrawOneHpBar(marginX, topY, barW, barH, f0, false);
+  // HP бар правого (f1) — справа, выровнен вправо
   _pvpDrawOneHpBar(W - marginX - barW, topY, barW, barH, f1, true);
 }
 
