@@ -1,0 +1,1655 @@
+/*
+  ══════════════════════════════════════════════════════
+  style.css — Все визуальные стили игры
+  Содержит: цветовые переменные, HUD, панели, инвентарь,
+  навигацию, модальные окна, скиллы, анимации,
+  экран выбора персонажа
+  ══════════════════════════════════════════════════════
+*/
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --gold: #f5c542;
+  --red: #e74c3c;
+  --green: #2ecc71;
+  --blue: #3498db;
+  --purple: #9b59b6;
+  --dark: #0d0d1a;
+  --panel: rgba(10,10,25,0.92);
+  --border: #2a2a5a;
+}
+html, body {
+  width: 100%; height: 100%;
+  background: #0d0d1a;
+  overflow: hidden;
+  font-family: 'Courier New', monospace;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+#app {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+
+/* ── TOP HUD ── */
+#hud {
+  position: absolute; top: 0; left: 0; right: 0;
+  z-index: 50;
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 8px 6px;
+  background: linear-gradient(180deg, rgba(4,4,18,0.99) 0%, rgba(6,6,22,0.85) 100%);
+  border-bottom: 1px solid rgba(90,70,160,0.5);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.6);
+}
+.hud-avatar {
+  width: 38px; height: 38px; flex-shrink: 0;
+  border: 2px solid var(--gold);
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1a0a3a, #2a1a4a);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 8px rgba(245,197,66,0.35), inset 0 0 8px rgba(0,0,0,0.5);
+  image-rendering: pixelated;
+  overflow: hidden;
+}
+.hud-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.hud-avatar .avatar-fallback {
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.hud-stats { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hud-row { display: flex; align-items: center; gap: 5px; }
+.bar-label { width: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.bar-wrap {
+  flex: 1; height: 7px;
+  background: rgba(10,10,30,0.9);
+  border-radius: 2px; overflow: hidden;
+  border: 1px solid rgba(60,60,100,0.6);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+}
+.bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+.bar-hp { background: linear-gradient(90deg, #8B0000, #e74c3c, #ff6b6b); box-shadow: 0 0 6px rgba(231,76,60,0.5); }
+.bar-xp { background: linear-gradient(90deg, #5b1f8a, #9b59b6, #c180ff); box-shadow: 0 0 6px rgba(155,89,182,0.5); }
+.bar-val { font-size: 8px; color: #ccc; min-width: 34px; text-align: right; flex-shrink: 0; }
+.hud-right { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; }
+.hud-info-row {
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(60,60,100,0.4);
+  border-radius: 4px; padding: 2px 5px;
+}
+.hud-divider { width: 1px; height: 10px; background: rgba(100,100,160,0.5); margin: 0 2px; }
+.hud-gold-val  { font-size: 11px; color: #f5c542; font-weight: bold; min-width: 26px; }
+.hud-pixr-img  { width: 12px; height: 12px; object-fit: contain; image-rendering: pixelated; flex-shrink: 0; }
+.hud-pixr-val  { font-size: 11px; color: #b060ff; font-weight: bold; min-width: 22px; }
+.hud-floor-val { font-size: 10px; color: #7ab8ff; min-width: 26px; }
+.hud-cp-val    { font-size: 10px; color: #ffaa00; min-width: 38px; }
+
+/* ── CANVAS (игровое поле) ── */
+#gameCanvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  image-rendering: pixelated;
+  cursor: pointer;
+}
+
+/* ── BOTTOM NAV (нижнее меню вкладок) ── */
+#nav {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  z-index: 50;
+  display: flex;
+  background: linear-gradient(0deg,rgba(5,5,20,0.98) 0%,rgba(5,5,20,0.7) 100%);
+  border-top: 1px solid var(--border);
+}
+.nav-btn {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 6px 2px 8px;
+  gap: 3px;
+  background: none; border: none; cursor: pointer;
+  color: #556; font-size: 8px; font-family: 'Courier New', monospace;
+  transition: color .2s;
+  position: relative;
+}
+.nav-btn.active { color: var(--gold); }
+.nav-btn.active::after {
+  content: '';
+  position: absolute; bottom: 0; left: 20%; right: 20%; height: 2px;
+  background: var(--gold); border-radius: 2px 2px 0 0;
+}
+.nav-icon { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; line-height: 1; }
+.nav-icon svg { width: 22px; height: 22px; image-rendering: pixelated; transition: filter .2s, transform .15s; }
+.nav-btn.active .nav-icon svg { filter: drop-shadow(0 0 4px currentColor); transform: scale(1.12); }
+
+/* ── PANELS (полноэкранные вкладки: инвентарь, улучшения и т.д.) ── */
+.panel {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 40;
+  background: var(--panel);
+  display: none; flex-direction: column;
+  overflow: hidden;
+}
+.panel.visible { display: flex; }
+.panel-header {
+  padding: 76px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px; color: var(--gold); letter-spacing: 2px; font-weight: bold;
+}
+.panel-body { flex: 1; overflow-y: auto; padding: 12px 14px 80px; }
+.panel-body::-webkit-scrollbar { width: 3px; }
+.panel-body::-webkit-scrollbar-thumb { background: var(--border); }
+
+/* ── ИНВЕНТАРЬ (сетка предметов) ── */
+.inv-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  margin-bottom: 10px;
+}
+.inv-slot {
+  aspect-ratio: 1; border-radius: 6px; border: 1.5px solid #2a2a5a;
+  background: rgba(255,255,255,0.03); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; cursor: pointer;
+  position: relative; overflow: hidden;
+  transition: border-color .15s, background .15s;
+}
+.inv-slot:active { background: rgba(255,255,255,0.08); }
+.inv-slot.equipped { border-color: #f5c542; background: rgba(245,197,66,0.08); }
+.inv-slot.rarity-common   { border-color: #556; }
+.inv-slot.rarity-uncommon { border-color: #2ecc71; }
+.inv-slot.rarity-rare     { border-color: #3498db; }
+.inv-slot.rarity-epic     { border-color: #9b59b6; }
+.inv-slot.rarity-legend   { border-color: #f5c542; box-shadow: 0 0 8px rgba(245,197,66,0.3); }
+.inv-slot.sel-mode { cursor: default; }
+.inv-slot.selected { border-color: #e74c3c !important; background: rgba(231,76,60,0.15) !important; box-shadow: 0 0 6px rgba(231,76,60,0.4); }
+.inv-slot .sel-check {
+  position: absolute; top: 3px; left: 4px;
+  font-size: 11px; line-height: 1;
+  display: none;
+}
+.inv-slot.sel-mode .sel-check { display: block; }
+.inv-icon { font-size: 22px; line-height: 1; }
+.inv-lvl  { font-size: 9px; color: #aaa; margin-top: 2px; }
+.inv-eq-badge {
+  position: absolute; top: 2px; right: 3px;
+  font-size: 8px; color: #f5c542;
+}
+.inv-rarity-dot {
+  position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
+  width: 5px; height: 5px; border-radius: 50%;
+}
+
+/* ── МОДАЛЬНОЕ ОКНО ПРЕДМЕТА ── */
+#itemModal {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 70; background: rgba(0,0,0,0.88);
+  display: none; align-items: flex-end; justify-content: center;
+}
+#itemModal.show { display: flex; }
+#itemModalCard {
+  width: 100%; max-width: 420px;
+  background: #0e0e22; border-top: 2px solid #2a2a5a;
+  border-radius: 16px 16px 0 0; padding: 20px 16px 32px;
+}
+.modal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.modal-icon { font-size: 40px; }
+.modal-title { flex: 1; }
+.modal-name  { font-size: 16px; font-weight: bold; }
+.modal-sub   { font-size: 11px; color: #778; margin-top: 2px; }
+.modal-stats { margin-bottom: 14px; }
+.modal-stat-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 0; border-bottom: 1px solid #1a1a35;
+  font-size: 12px; color: #bbb;
+}
+.modal-stat-row span { color: #4cf; font-weight: bold; }
+.modal-actions { display: flex; gap: 8px; }
+.modal-btn {
+  flex: 1; padding: 10px; font-size: 12px; font-family: 'Courier New', monospace;
+  border-radius: 8px; border: 1.5px solid; cursor: pointer; text-align: center;
+  letter-spacing: 0.5px;
+}
+.modal-btn.equip   { border-color: #f5c542; color: #f5c542; background: rgba(245,197,66,0.1); }
+.modal-btn.unequip { border-color: #e74c3c; color: #e74c3c; background: rgba(231,76,60,0.1); }
+.modal-btn.destroy { border-color: #e74c3c; color: #e74c3c; background: rgba(231,76,60,0.05); }
+.modal-btn.refine  { border-color: #a78bfa; color: #a78bfa; background: rgba(167,139,250,0.1); }
+
+/* ── ЗАТОЧКА (refine блок в модалке) ── */
+.refine-info {
+  margin: 10px 0 4px; padding: 8px 10px;
+  background: rgba(167,139,250,0.07); border: 1px solid rgba(167,139,250,0.25);
+  border-radius: 8px; font-size: 11px; color: #998;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.refine-stars { color: #a78bfa; font-size: 13px; letter-spacing: 1px; }
+.refine-chance { color: #f5c542; font-weight: bold; }
+
+/* ── ОВЕРЛЕЙ РЕЗУЛЬТАТА ЗАТОЧКИ ── */
+#refineOverlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 80; display: none; align-items: center; justify-content: center;
+  flex-direction: column; gap: 10px; background: rgba(0,0,0,0.88);
+}
+#refineOverlay.show { display: flex; animation: none; }
+.refine-result-icon { font-size: 64px; animation: refinePop 0.4s ease-out; }
+.refine-result-text { font-size: 22px; font-weight: bold; letter-spacing: 2px; }
+.refine-result-sub  { font-size: 13px; color: #aaa; margin-top: 2px; }
+@keyframes refinePop {
+  0%   { transform: scale(0.3); opacity: 0; }
+  60%  { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ── НОТИФИКАЦИЯ О ДРОПЕ ПРЕДМЕТА ── */
+.drop-notif {
+  position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+  z-index: 56; pointer-events: none;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 20px;
+  background: rgba(10,10,30,0.92); border: 1px solid #2a2a5a;
+  font-size: 11px; font-family: 'Courier New', monospace;
+  animation: dropIn 2.5s ease-out forwards;
+  white-space: nowrap;
+}
+@keyframes dropIn {
+  0%   { opacity:0; transform: translateX(-50%) translateY(10px); }
+  15%  { opacity:1; transform: translateX(-50%) translateY(0); }
+  75%  { opacity:1; }
+  100% { opacity:0; transform: translateX(-50%) translateY(-8px); }
+}
+
+/* ── УЛУЧШЕНИЯ (upgrades панель) ── */
+.upg-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px; margin-bottom: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.upg-icon { font-size: 24px; }
+.upg-info { flex: 1; }
+.upg-name { font-size: 12px; color: #ddd; }
+.upg-level { font-size: 10px; color: #aaf; }
+.upg-bar-wrap { height: 4px; background: #111; border-radius: 2px; margin: 4px 0; }
+.upg-bar { height: 4px; background: var(--blue); border-radius: 2px; transition: width .4s; }
+.upg-btn {
+  padding: 6px 10px; font-size: 10px; font-family: 'Courier New', monospace;
+  border: 1px solid var(--blue); background: rgba(52,152,219,0.12);
+  color: var(--blue); border-radius: 4px; cursor: pointer;
+  white-space: nowrap;
+}
+.upg-btn:active { background: rgba(52,152,219,0.3); }
+
+/* ── РЕЙТИНГ ── */
+.rating-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin-bottom: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.rating-rank { font-size: 16px; color: var(--gold); width: 28px; text-align: center; }
+.rating-name { flex: 1; font-size: 12px; color: #ddd; }
+.rating-cp { font-size: 11px; color: #fa0; }
+
+/* ── КОШЕЛЁК ── */
+.wallet-card {
+  padding: 14px; margin-bottom: 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.wallet-label { font-size: 10px; color: #778; margin-bottom: 4px; }
+.wallet-val { font-size: 22px; color: var(--gold); font-weight: bold; }
+.wallet-sub { font-size: 10px; color: #aaa; margin-top: 2px; }
+.wallet-actions { display: flex; gap: 8px; margin-top: 12px; }
+.wallet-btn {
+  flex: 1; padding: 8px; font-size: 11px; font-family: 'Courier New', monospace;
+  border-radius: 6px; border: 1px solid; cursor: pointer;
+  text-align: center;
+}
+.wallet-btn.dep { border-color: var(--green); color: var(--green); background: rgba(46,204,113,0.1); }
+.wallet-btn.wit { border-color: var(--red); color: var(--red); background: rgba(231,76,60,0.1); }
+
+/* ── СТАТИСТИКА (сетка внутри кошелька) ── */
+.stats-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px;
+}
+.stat-cell {
+  padding: 10px; background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.stat-icon { font-size: 18px; }
+.stat-label { font-size: 9px; color: #778; margin-top: 2px; }
+.stat-val { font-size: 14px; color: #ddd; font-weight: bold; }
+
+/* ── HUD СКИЛЛОВ (3 иконки навыков над кнопкой ИГРА) ── */
+#skillsHud {
+  position: absolute;
+  bottom: 0; left: 0;
+  z-index: 51;
+  display: none;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0 4px;
+  pointer-events: auto;
+}
+#skillsHud.visible { display: flex; }
+
+.sk-btn {
+  position: relative;
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  border: 2px solid rgba(255,255,255,0.15);
+  background: rgba(6,6,20,0.88);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s, box-shadow .15s;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+.sk-btn.ready {
+  border-color: var(--sk-col, #aaa);
+  box-shadow: 0 0 10px var(--sk-col, #aaa), 0 2px 8px rgba(0,0,0,0.5);
+}
+.sk-btn.oncd { opacity: 0.6; }
+.sk-btn:active { transform: scale(0.9); }
+
+/* Заполнение кулдауна скилла */
+.sk-cd-fill {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.6);
+  clip-path: none;
+  pointer-events: none;
+}
+.sk-cd-num {
+  position: absolute; bottom: 1px; right: 3px;
+  font-size: 9px; font-weight: bold; color: #fff;
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 3px #000;
+  pointer-events: none;
+  line-height: 1;
+}
+.sk-locked-overlay {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; border-radius: 8px;
+  pointer-events: none;
+}
+
+/* Вспышка при применении скилла */
+.skill-flash {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none; z-index: 58;
+  animation: skillFlash 0.5s ease-out forwards;
+}
+@keyframes skillFlash {
+  0%   { opacity: 0.35; }
+  100% { opacity: 0; }
+}
+
+/* ── МОДАЛЬНОЕ ОКНО ДРОПА ЭТАЖА ── */
+#floorLootModal {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 70; background: rgba(0,0,0,0.88);
+  display: none; align-items: flex-end; justify-content: center;
+}
+#floorLootModal.show { display: flex; }
+#floorLootCard {
+  width: 100%; max-width: 420px;
+  background: #0e0e22; border-top: 2px solid #2a2a5a;
+  border-radius: 16px 16px 0 0; padding: 20px 16px 32px;
+  max-height: 70vh; overflow-y: auto;
+}
+.loot-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 0; border-bottom: 1px solid #1a1a35; font-size: 12px;
+}
+.loot-rarity-badge {
+  font-size: 9px; padding: 2px 7px; border-radius: 10px; border: 1px solid;
+  font-family: 'Courier New', monospace;
+}
+
+/* ── ТОСТ ОТКРЫТИЯ НОВОГО ЭТАЖА ── */
+#floorUnlock {
+  position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+  z-index: 60; display: none; pointer-events: none;
+  background: rgba(10,10,25,0.95);
+  border: 1.5px solid var(--gold);
+  border-radius: 12px; padding: 10px 18px;
+  flex-direction: column; align-items: center; gap: 3px;
+  box-shadow: 0 0 20px rgba(245,197,66,0.2);
+  white-space: nowrap;
+}
+#floorUnlock.show { display: flex; animation: toastPop 3.5s ease-out forwards; }
+@keyframes toastPop {
+  0%   { opacity:0; transform: translateX(-50%) translateY(-8px); }
+  12%  { opacity:1; transform: translateX(-50%) translateY(0); }
+  75%  { opacity:1; }
+  100% { opacity:0; transform: translateX(-50%) translateY(-6px); }
+}
+#floorUnlock .fu-title { font-size: 13px; color: var(--gold); letter-spacing: 1px; font-weight: bold; }
+#floorUnlock .fu-sub   { font-size: 10px; color: #aaa; }
+
+/* ── ВСПЛЫВАЮЩИЙ УРОН (числа над монстрами) ── */
+.dmg-pop {
+  position: absolute; pointer-events: none;
+  font-size: 13px; font-weight: bold; font-family: 'Courier New', monospace;
+  animation: popUp 0.9s ease-out forwards;
+  z-index: 55; text-shadow: 1px 1px 0 #000;
+}
+@keyframes popUp {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-50px) scale(0.7); }
+}
+
+.px { image-rendering: pixelated; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ══════════════════════════════════════════════════════
+   ЭКРАН ВЫБОРА ПЕРСОНАЖА
+   ══════════════════════════════════════════════════════ */
+#charSelect {
+  position: fixed; inset: 0; z-index: 200;
+  background: #020008;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-start;
+  overflow: hidden;
+}
+#charSelect.hidden { display: none; }
+
+.cs-bg {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 30%, #1a0035 0%, #050010 55%, #000 100%);
+  z-index: 0;
+}
+.cs-particles { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+
+.cs-title {
+  position: relative; z-index: 2;
+  margin-top: 60px;
+  font-size: 11px; letter-spacing: 5px; color: #5a4a8a;
+  text-transform: uppercase;
+}
+.cs-subtitle {
+  position: relative; z-index: 2;
+  font-size: 22px; font-weight: bold; color: #e8e0ff;
+  letter-spacing: 2px; margin-top: 4px;
+  text-shadow: 0 0 20px rgba(160,100,255,0.5);
+}
+
+.cs-cards {
+  position: relative; z-index: 2;
+  display: flex; gap: 10px;
+  margin-top: 12px; padding: 0 8px;
+  width: 100%; max-width: 480px;
+  justify-content: center;
+}
+
+/* Карточка персонажа */
+.cs-card {
+  flex: 1; max-width: 140px;
+  border-radius: 16px;
+  border: 1.5px solid #2a1a4a;
+  background: rgba(20,10,40,0.7);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 10px 6px 10px;
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+  position: relative; overflow: hidden;
+  backdrop-filter: blur(4px);
+}
+.cs-card::before {
+  content: ''; position: absolute; inset: 0; opacity: 0;
+  transition: opacity 0.25s;
+  border-radius: 16px;
+}
+.cs-card.fire::before   { background: radial-gradient(ellipse at 50% 0%, rgba(255,80,0,0.18) 0%, transparent 70%); }
+.cs-card.light::before  { background: radial-gradient(ellipse at 50% 0%, rgba(255,220,80,0.18) 0%, transparent 70%); }
+.cs-card.water::before  { background: radial-gradient(ellipse at 50% 0%, rgba(0,180,255,0.18) 0%, transparent 70%); }
+.cs-card:active, .cs-card.selected { transform: scale(1.03); }
+.cs-card.selected::before { opacity: 1; }
+.cs-card.fire.selected   { border-color: #ff6020; box-shadow: 0 0 22px rgba(255,80,0,0.35); }
+.cs-card.light.selected  { border-color: #ffd040; box-shadow: 0 0 22px rgba(255,200,40,0.35); }
+.cs-card.water.selected  { border-color: #20c0ff; box-shadow: 0 0 22px rgba(0,180,255,0.35); }
+
+.cs-sprite-wrap {
+  width: 90px; height: 100px;
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.cs-sprite-canvas { image-rendering: pixelated; position: absolute; }
+.cs-sprite-glow   { position: absolute; inset: -8px; border-radius: 50%; opacity: 0.5; }
+.cs-card.fire  .cs-sprite-glow { background: radial-gradient(circle, rgba(255,100,0,0.35) 0%, transparent 70%); }
+.cs-card.light .cs-sprite-glow { background: radial-gradient(circle, rgba(255,220,80,0.35) 0%, transparent 70%); }
+.cs-card.water .cs-sprite-glow { background: radial-gradient(circle, rgba(0,180,255,0.35) 0%, transparent 70%); }
+
+.cs-class-name {
+  font-size: 13px; font-weight: bold; letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+.cs-card.fire  .cs-class-name { color: #ff7040; }
+.cs-card.light .cs-class-name { color: #ffd060; }
+.cs-card.water .cs-class-name { color: #40d0ff; }
+
+.cs-class-title {
+  font-size: 9px; color: #665; letter-spacing: 1px;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+
+.cs-bars { width: 100%; display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.cs-bar-row { display: flex; align-items: center; gap: 5px; }
+.cs-bar-label { font-size: 8px; color: #665; width: 28px; text-align: right; flex-shrink: 0; }
+.cs-bar-track { flex: 1; height: 5px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+.cs-bar-fill  { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.cs-card.fire  .cs-bar-fill { background: linear-gradient(90deg, #c03000, #ff7030); }
+.cs-card.light .cs-bar-fill { background: linear-gradient(90deg, #c08000, #ffd040); }
+.cs-card.water .cs-bar-fill { background: linear-gradient(90deg, #0070c0, #40d0ff); }
+
+.cs-perk {
+  font-size: 9px; text-align: center; line-height: 1.4;
+  padding: 5px 6px; border-radius: 6px; margin-top: 2px;
+}
+.cs-card.fire  .cs-perk { color: #ff9060; background: rgba(255,80,0,0.1); border: 1px solid rgba(255,80,0,0.2); }
+.cs-card.light .cs-perk { color: #ffd080; background: rgba(255,200,0,0.08); border: 1px solid rgba(255,200,0,0.18); }
+.cs-card.water .cs-perk { color: #60d8ff; background: rgba(0,160,255,0.08); border: 1px solid rgba(0,160,255,0.18); }
+
+/* Кнопка подтверждения выбора */
+.cs-confirm {
+  position: relative; z-index: 2;
+  margin-top: 16px;
+  width: calc(100% - 20px); max-width: 460px;
+  padding: 14px; border-radius: 12px;
+  border: 1.5px solid #3a2a6a;
+  background: rgba(30,15,60,0.6);
+  cursor: pointer; text-align: center;
+  font-size: 13px; font-weight: bold; letter-spacing: 2px;
+  color: #c0a0ff; transition: all 0.2s;
+  backdrop-filter: blur(4px);
+}
+.cs-confirm:active { transform: scale(0.97); }
+.cs-confirm.ready {
+  border-color: #8060d0;
+  background: rgba(80,40,160,0.35);
+  color: #e0d0ff;
+  box-shadow: 0 0 20px rgba(120,60,220,0.3);
+}
+
+/* ══════════════════════════════════
+   ЗЕЛЬЯ
+   ══════════════════════════════════ */
+.potion-btn { border-color: rgba(255,80,80,0.4) !important; }
+.potion-btn:active { border-color: #f44 !important; }
+.potion-count {
+  position: absolute; bottom: 1px; right: 3px;
+  font-size: 9px; font-weight: bold; color: #f88;
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 3px #000;
+  pointer-events: none; line-height: 1;
+}
+
+.potion-modal {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.75);
+  display: flex; align-items: center; justify-content: center;
+}
+.potion-modal.hidden { display: none; }
+.potion-modal-box {
+  background: #0e0e22;
+  border: 1.5px solid #3a1a3a;
+  border-radius: 16px;
+  padding: 20px 18px 16px;
+  width: 80%; max-width: 300px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.potion-modal-title {
+  font-size: 16px; font-weight: bold; color: #f88;
+  text-align: center; margin-bottom: 2px;
+  font-family: 'Courier New', monospace;
+}
+.potion-modal-info {
+  font-size: 10px; color: #778; text-align: center; margin-bottom: 4px;
+}
+.potion-modal-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.potion-modal-label { font-size: 12px; color: #aaa; flex: 1; }
+.potion-modal-val { font-size: 14px; font-weight: bold; color: #fff; }
+.potion-buy-row {
+  display: flex; gap: 8px; justify-content: center; margin-top: 4px;
+}
+.potion-buy-btn {
+  flex: 1; padding: 8px 0; border-radius: 8px;
+  border: 1px solid #f44; background: rgba(255,50,50,0.12);
+  color: #f88; font-size: 14px; font-weight: bold;
+  cursor: pointer; font-family: 'Courier New', monospace;
+}
+.potion-buy-btn:active { background: rgba(255,50,50,0.3); }
+.potion-threshold-input {
+  width: 48px; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid #444; background: #1a1a2e;
+  color: #fff; font-size: 13px; text-align: center;
+  font-family: 'Courier New', monospace;
+}
+.potion-close-btn {
+  margin-top: 8px; padding: 10px; border-radius: 8px;
+  border: 1px solid #333; background: rgba(255,255,255,0.05);
+  color: #aaa; font-size: 13px; cursor: pointer;
+  font-family: 'Courier New', monospace;
+}
+.potion-close-btn:active { background: rgba(255,255,255,0.12); }
+
+/* Кулдаун зелья — левый верхний угол */
+#potionCd {
+  position: absolute; top: 2px; left: 3px;
+  bottom: auto; right: auto;
+  font-size: 9px; font-weight: bold; color: #fff;
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 3px #000;
+  pointer-events: none; line-height: 1;
+}
+
+/* ══════════════════════════════════
+   BATTLE PASS
+   ══════════════════════════════════ */
+.bp-hud-btn {
+  position: absolute; z-index: 52;
+  right: 8px; top: 56px;
+  width: 44px; height: 36px;
+  border-radius: 8px;
+  background: rgba(10,8,20,0.88);
+  border: 1.5px solid rgba(255,200,0,0.5);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(255,200,0,0.2);
+}
+.bp-hud-btn:active { transform: scale(0.9); }
+.bp-hud-label { font-size: 7px; font-weight: bold; color: #ffd700; letter-spacing: 0.5px; line-height: 1; font-family: 'Courier New', monospace; }
+.prem-hud-btn {
+  position: absolute; z-index: 52;
+  right: 8px; top: 98px;
+  width: 44px; height: 36px;
+  border-radius: 8px;
+  background: rgba(10,5,25,0.88);
+  border: 1.5px solid rgba(180,100,255,0.5);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(160,80,255,0.2);
+}
+.prem-hud-btn:active { transform: scale(0.9); }
+.prem-hud-label { font-size: 7px; font-weight: bold; color: #c080ff; letter-spacing: 0.5px; line-height: 1; font-family: 'Courier New', monospace; }
+
+/* Премиум модалка */
+.prem-modal {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.82);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 60px; overflow-y: auto;
+}
+.prem-modal.hidden { display: none; }
+.prem-modal-box {
+  background: #08051a;
+  border: 1.5px solid #3a1a5a;
+  border-radius: 16px;
+  width: 92%; max-width: 360px;
+  padding: 16px 14px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  margin-bottom: 20px;
+}
+.prem-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.prem-modal-title {
+  font-size: 16px; font-weight: bold; color: #c080ff;
+  font-family: 'Courier New', monospace; letter-spacing: 1px;
+}
+.prem-close-btn {
+  background: none; border: none; color: #888;
+  font-size: 18px; cursor: pointer; padding: 0 4px;
+}
+.prem-status {
+  font-size: 11px; text-align: center;
+  background: rgba(160,80,255,0.08); border: 1px solid #3a1a5a;
+  border-radius: 8px; padding: 7px; color: #aaa;
+}
+.prem-card {
+  border-radius: 12px; padding: 12px;
+  border: 1.5px solid #2a1a4a;
+  background: rgba(255,255,255,0.03);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.prem-card.gold-card  { border-color: #c08000; background: rgba(200,140,0,0.07); }
+.prem-card.plat-card  { border-color: #9b59b6; background: rgba(155,89,182,0.09); }
+.prem-card.ultra-card { border-color: #e74c3c; background: rgba(231,76,60,0.09); }
+.prem-card-title { font-size: 13px; font-weight: bold; font-family: 'Courier New', monospace; }
+.gold-card  .prem-card-title { color: #ffd700; }
+.plat-card  .prem-card-title { color: #c080ff; }
+.ultra-card .prem-card-title { color: #ff6060; }
+.prem-card-price { font-size: 10px; color: #aaa; margin-bottom: 2px; }
+.prem-card-perks { font-size: 10px; color: #ccc; line-height: 1.7; }
+.prem-card-btn {
+  margin-top: 4px; padding: 8px; border-radius: 8px;
+  font-size: 12px; font-weight: bold; cursor: pointer;
+  font-family: 'Courier New', monospace; border: 1px solid;
+}
+.gold-card  .prem-card-btn { background: rgba(200,140,0,0.2); border-color: #ffd700; color: #ffd700; }
+.plat-card  .prem-card-btn { background: rgba(155,89,182,0.2); border-color: #c080ff; color: #c080ff; }
+.ultra-card .prem-card-btn { background: rgba(231,76,60,0.2); border-color: #ff6060; color: #ff6060; }
+.prem-card-btn:active { opacity: 0.7; }
+
+/* Battle Pass модалка */
+.bp-modal {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.82);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 60px; overflow-y: auto;
+}
+.bp-modal.hidden { display: none; }
+.bp-modal-box {
+  background: #0a0a1e; border: 1.5px solid #4a3a00;
+  border-radius: 16px; width: 92%; max-width: 360px;
+  padding: 16px 14px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.bp-modal-header { display: flex; align-items: center; justify-content: space-between; }
+.bp-modal-title { font-size: 16px; font-weight: bold; color: #ffd700; font-family: 'Courier New', monospace; letter-spacing: 1px; }
+.bp-close-btn { background: none; border: none; color: #888; font-size: 18px; cursor: pointer; padding: 0 4px; }
+.bp-status { font-size: 11px; color: #aaa; text-align: center; background: rgba(255,200,0,0.06); border: 1px solid #3a2a00; border-radius: 8px; padding: 6px; }
+.bp-buy-row { display: flex; align-items: center; justify-content: space-between; background: rgba(255,180,0,0.08); border: 1px solid #4a3500; border-radius: 10px; padding: 8px 12px; }
+.bp-buy-row.hidden { display: none; }
+.bp-buy-label { font-size: 12px; color: #cca040; }
+.bp-buy-btn { background: linear-gradient(90deg, #7a5000, #c08000); border: 1px solid #ffd700; border-radius: 8px; color: #fff8e0; font-size: 12px; font-weight: bold; padding: 6px 14px; cursor: pointer; font-family: 'Courier New', monospace; }
+.bp-buy-btn:active { opacity: 0.7; }
+.bp-rewards-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.bp-reward-row { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.03); border: 1px solid #1e1e3a; border-radius: 10px; padding: 8px 10px; }
+.bp-reward-row.bp-claimed { opacity: 0.45; border-color: #2a2a1a; }
+.bp-reward-row.bp-available { border-color: #c08000; background: rgba(200,140,0,0.08); }
+.bp-reward-lv { font-size: 11px; font-weight: bold; color: #ffd700; min-width: 38px; text-align: center; font-family: 'Courier New', monospace; }
+.bp-reward-lv-locked { color: #888; }
+.bp-reward-icon { font-size: 20px; }
+.bp-reward-desc { flex: 1; font-size: 11px; color: #ccc; line-height: 1.4; }
+.bp-reward-desc-locked { color: #999; }
+.bp-claim-btn { background: linear-gradient(90deg, #6a4000, #c08000); border: 1px solid #ffd700; border-radius: 7px; color: #fff8d0; font-size: 11px; font-weight: bold; padding: 5px 10px; cursor: pointer; font-family: 'Courier New', monospace; white-space: nowrap; }
+.bp-claim-btn:active { opacity: 0.7; }
+.bp-claimed-label { font-size: 10px; color: #8a8a5a; font-family: 'Courier New', monospace; }
+.bp-lock-label { font-size: 10px; color: #888; font-family: 'Courier New', monospace; }
+
+/* ══════════════════════════════════
+   МОДАЛКА СМЕРТИ
+   ══════════════════════════════════ */
+.death-modal {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,0.88);
+  display: flex; align-items: center; justify-content: center;
+}
+.death-modal.hidden { display: none; }
+.death-modal-box {
+  background: #0e0508;
+  border: 2px solid #6a0000;
+  border-radius: 18px;
+  padding: 28px 24px 22px;
+  width: 80%; max-width: 300px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  box-shadow: 0 0 40px rgba(180,0,0,0.4);
+}
+.death-modal-skull {
+  font-size: 52px; line-height: 1;
+  animation: deathPulse 1.2s ease-in-out infinite;
+}
+@keyframes deathPulse {
+  0%,100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.12); opacity: 0.7; }
+}
+.death-modal-title {
+  font-size: 20px; font-weight: bold; color: #d00;
+  font-family: 'Courier New', monospace; letter-spacing: 3px;
+  text-shadow: 0 0 12px rgba(220,0,0,0.6);
+}
+.death-modal-penalty {
+  font-size: 13px; color: #f88;
+  text-align: center; line-height: 1.5;
+  font-family: 'Courier New', monospace;
+}
+.death-revive-btn {
+  margin-top: 8px;
+  width: 100%; padding: 13px;
+  border-radius: 10px;
+  border: 1.5px solid #c00;
+  background: linear-gradient(180deg, #3a0000, #1a0000);
+  color: #ff8080; font-size: 15px; font-weight: bold;
+  cursor: pointer; font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+}
+.death-revive-btn:active { opacity: 0.7; transform: scale(0.97); }
+
+/* ══════════════════════════════════════════════════════
+   ЭКРАН ЗАГРУЗКИ
+   ══════════════════════════════════════════════════════ */
+#loadingScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #0d0d1a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  transition: opacity 0.5s ease;
+  will-change: opacity;
+}
+#loadingScreen.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+#loadingScreen.hidden-done {
+  display: none !important;
+  pointer-events: none;
+}
+.ls-stars {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ls-star {
+  position: absolute;
+  width: 2px; height: 2px;
+  background: #fff;
+  border-radius: 0;
+  image-rendering: pixelated;
+  animation: ls-twinkle var(--dur, 2s) ease-in-out infinite var(--delay, 0s);
+}
+@keyframes ls-twinkle {
+  0%, 100% { opacity: 0.15; }
+  50%       { opacity: 0.9; }
+}
+
+/* Пиксельный логотип */
+.ls-logo-wrap {
+  position: relative;
+  margin-bottom: 32px;
+}
+.ls-pixel-icon {
+  display: block;
+  margin: 0 auto 14px;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 12px rgba(245,197,66,0.5));
+  animation: ls-float 2s ease-in-out infinite;
+}
+@keyframes ls-float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-6px); }
+}
+.ls-title {
+  font-family: 'Courier New', monospace;
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 4px;
+  color: #f5c542;
+  text-align: center;
+  text-shadow: 0 0 20px rgba(245,197,66,0.6);
+  margin-bottom: 4px;
+}
+.ls-subtitle {
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 6px;
+  color: #556;
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 40px;
+}
+
+/* Прогресс-бар */
+.ls-bar-wrap {
+  width: 220px;
+  height: 10px;
+  background: #111;
+  border: 1.5px solid #2a2a5a;
+  border-radius: 0;
+  overflow: hidden;
+  position: relative;
+  image-rendering: pixelated;
+  margin-bottom: 12px;
+}
+.ls-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f5c542, #ffd700);
+  width: 0%;
+  transition: width 0.4s ease;
+  position: relative;
+}
+.ls-bar-fill::after {
+  content: '';
+  position: absolute;
+  right: 0; top: 0;
+  width: 4px; height: 100%;
+  background: #fff;
+  opacity: 0.7;
+  animation: ls-bar-shine 0.6s steps(1) infinite;
+}
+@keyframes ls-bar-shine { 50% { opacity: 0; } }
+
+/* Статус */
+.ls-status {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #778;
+  letter-spacing: 1px;
+  min-height: 16px;
+  text-align: center;
+}
+.ls-dots::after {
+  content: '';
+  animation: ls-dot 1.2s steps(4, end) infinite;
+}
+@keyframes ls-dot {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
+}
+
+/* Версия */
+.ls-version {
+  position: absolute;
+  bottom: 20px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  color: #2a2a5a;
+  letter-spacing: 2px;
+}
+
+/* ── 7 кнопок в нав: чуть меньше иконка и паддинги ── */
+@media (max-width: 430px) {
+  .nav-btn { padding: 5px 1px 7px; gap: 2px; font-size: 7px; }
+  .nav-icon { width: 19px; height: 19px; }
+  .nav-icon svg { width: 19px; height: 19px; }
+}
+/* ══════════════════════════════════════════════════════
+   МОДАЛКИ КОШЕЛЬКА (пополнение/вывод)
+   ══════════════════════════════════════════════════════ */
+.wallet-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  animation: walletFadeIn 0.25s ease-out;
+}
+
+.wallet-modal.hidden {
+  display: none !important;
+}
+
+@keyframes walletFadeIn {
+  0% { opacity: 0; transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.wallet-modal-content {
+  width: 92%;
+  max-width: 380px;
+  max-height: 85vh;
+  background: #0e0e22;
+  border: 1px solid #2a4a6a;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(64, 208, 255, 0.15);
+}
+
+.wallet-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1a1a35;
+  background: rgba(64, 208, 255, 0.05);
+}
+
+.wallet-modal-title {
+  font-size: 15px;
+  font-weight: bold;
+  color: #40d0ff;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+}
+
+.wallet-modal-close {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  transition: color 0.2s;
+}
+
+.wallet-modal-close:hover {
+  color: #e74c3c;
+}
+
+.wallet-modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 70vh;
+}
+
+.wallet-modal-body::-webkit-scrollbar {
+  width: 3px;
+}
+
+.wallet-modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.wallet-modal-body::-webkit-scrollbar-thumb {
+  background: #2a2a5a;
+  border-radius: 2px;
+}
+
+.wallet-info {
+  font-size: 12px;
+  color: #778;
+  margin-bottom: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  border: 1px solid #1a1a35;
+}
+
+.wallet-info b {
+  color: #40d0ff;
+}
+
+.wallet-modal-body label {
+  display: block;
+  font-size: 11px;
+  color: #778;
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.wallet-modal-body input,
+.wallet-modal-body select {
+  width: 100%;
+  padding: 10px 12px;
+  background: #0d0d22;
+  border: 1px solid #2a2a5a;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 15px;
+  font-family: 'Courier New', monospace;
+  transition: border-color 0.2s;
+  outline: none;
+}
+
+.wallet-modal-body input:focus,
+.wallet-modal-body select:focus {
+  border-color: #40d0ff;
+}
+
+.wallet-modal-body input::placeholder {
+  color: #445;
+}
+
+/* Реквизиты */
+.wallet-address-box {
+  background: rgba(64, 208, 255, 0.06);
+  border: 1px solid #2a4a6a;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.wallet-address-label {
+  font-size: 10px;
+  color: #556;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.wallet-address {
+  font-size: 11px;
+  color: #ddd;
+  word-break: break-all;
+  background: #0a0a1a;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-family: monospace;
+  border: 1px solid #1a1a35;
+  user-select: all;
+}
+
+.wallet-memo {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #556;
+}
+
+.wallet-memo span {
+  color: #40d0ff;
+  font-weight: bold;
+}
+
+/* Кнопки */
+.wallet-submit-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: 'Courier New', monospace;
+  transition: opacity 0.2s, transform 0.15s;
+}
+
+.wallet-submit-btn:active {
+  transform: scale(0.97);
+}
+
+.wallet-submit-btn.deposit {
+  background: linear-gradient(90deg, #1a5a3a, #2a8a4a);
+  color: #fff;
+}
+
+.wallet-submit-btn.withdraw {
+  background: linear-gradient(90deg, #5a2a2a, #8a3a3a);
+  color: #fff;
+}
+
+.wallet-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wallet-result {
+  margin-top: 8px;
+  font-size: 12px;
+  text-align: center;
+  min-height: 18px;
+}
+
+.wallet-result.success {
+  color: #2ecc71;
+}
+
+.wallet-result.error {
+  color: #e74c3c;
+}
+
+.wallet-result.loading {
+  color: #f5c542;
+}
+
+/* ── АДАПТИВ ── */
+@media (max-width: 420px) {
+  .wallet-modal-content {
+    width: 96%;
+    max-width: 100%;
+    margin: 0 8px;
+  }
+
+  .wallet-modal-title {
+    font-size: 13px;
+  }
+
+  .wallet-modal-body {
+    padding: 12px;
+  }
+
+  .wallet-modal-body input {
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+}
+
+@media (min-width: 600px) {
+  .wallet-modal-content {
+    max-width: 420px;
+  }
+}
+/* ═══════════════════════════════
+   TASK — кнопка HUD (под VIP)
+   ═══════════════════════════════ */
+.task-hud-btn {
+  position: absolute; z-index: 52;
+  right: 8px; top: 140px;
+  width: 44px; height: 36px;
+  border-radius: 8px;
+  background: rgba(5,20,10,0.88);
+  border: 1.5px solid rgba(46,204,113,0.5);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(46,204,113,0.2);
+}
+.task-hud-btn:active { transform: scale(0.9); }
+.task-hud-label { font-size: 7px; font-weight: bold; color: #2ecc71; letter-spacing: 0.5px; line-height: 1; font-family: 'Courier New', monospace; }
+
+/* ═══════════════════════════════
+   TASK — кнопка HUD (под VIP)
+   ═══════════════════════════════ */
+.task-hud-btn {
+  position: absolute; z-index: 52;
+  right: 8px; top: 140px;
+  width: 44px; height: 36px;
+  border-radius: 8px;
+  background: rgba(5,20,10,0.88);
+  border: 1.5px solid rgba(46,204,113,0.5);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(46,204,113,0.2);
+}
+.task-hud-btn:active { transform: scale(0.9); }
+.task-hud-label { font-size: 7px; font-weight: bold; color: #2ecc71; letter-spacing: 0.5px; line-height: 1; font-family: 'Courier New', monospace; }
+
+/* ═══════════════════════════════
+   TASK — модалка
+   ═══════════════════════════════ */
+.task-modal {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.82);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 60px; overflow-y: auto;
+}
+.task-modal.hidden { display: none; }
+.task-modal-box {
+  background: #06110a;
+  border: 1.5px solid #1a4a2a;
+  border-radius: 16px;
+  width: 92%; max-width: 360px;
+  padding: 16px 14px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  margin-bottom: 20px;
+}
+.task-modal-header { display: flex; align-items: center; justify-content: space-between; }
+.task-modal-title  { font-size: 16px; font-weight: bold; color: #2ecc71; font-family: 'Courier New', monospace; letter-spacing: 1px; }
+.task-modal-body   { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+
+/* строка задания */
+.task-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid #1a2a1e; border-radius: 10px; padding: 9px 10px;
+}
+.task-row.task-avail { border-color: #1a6a30; background: rgba(46,204,113,0.06); }
+.task-row.task-done  { opacity: 0.4; }
+.task-row-left  { flex: 1; min-width: 0; }
+.task-row-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+.task-title     { font-size: 12px; color: #ccc; font-family: 'Courier New', monospace; margin-bottom: 4px; }
+.task-desc      { font-size: 10px; color: #667; margin-top: 2px; }
+.task-reward-lbl { font-size: 12px; font-weight: bold; color: #f5c542; white-space: nowrap; }
+.task-progress-wrap { display: flex; align-items: center; gap: 6px; }
+.task-progress-bar  { flex: 1; height: 4px; background: #0d1f14; border-radius: 2px; overflow: hidden; }
+.task-progress-fill { height: 100%; background: #2ecc71; border-radius: 2px; transition: width 0.3s; }
+.task-progress-lbl  { font-size: 9px; color: #556; white-space: nowrap; }
+.task-claim-btn {
+  background: linear-gradient(90deg,#0a4a1e,#1a8a3e);
+  border: 1px solid #2ecc71; border-radius: 7px;
+  color: #c8ffe0; font-size: 11px; font-weight: bold;
+  padding: 5px 10px; cursor: pointer;
+  font-family: 'Courier New', monospace; white-space: nowrap;
+}
+.task-claim-btn:active { opacity: 0.7; }
+.task-go-btn {
+  background: linear-gradient(90deg,#0a2a5a,#1a4a9a);
+  border: 1px solid #4a8aff; border-radius: 7px;
+  color: #c8d8ff; font-size: 11px; font-weight: bold;
+  padding: 5px 10px; cursor: pointer;
+  font-family: 'Courier New', monospace; white-space: nowrap;
+}
+.task-go-btn:active { opacity: 0.7; }
+.task-done-lbl   { font-size: 14px; color: #2ecc71; }
+.task-locked-lbl { font-size: 10px; color: #445; white-space: nowrap; }
+.task-timer-lbl  { font-size: 11px; color: #f5c542; white-space: nowrap; font-family: 'Courier New', monospace; }
+/* ═══════════════════════════════
+   BOSS — кнопка HUD (под TASK)
+   ═══════════════════════════════ */
+.boss-hud-btn {
+  position: absolute; z-index: 52;
+  right: 8px; top: 184px;
+  width: 44px; height: 36px;
+  border-radius: 8px;
+  background: rgba(20,5,5,0.88);
+  border: 1.5px solid rgba(231,76,60,0.6);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(231,76,60,0.3);
+}
+.boss-hud-btn:active { transform: scale(0.9); }
+.boss-hud-label { font-size: 7px; font-weight: bold; color: #e74c3c; letter-spacing: 0.5px; line-height: 1; font-family: 'Courier New', monospace; }
+
+/* ══════════════════════════════════
+   МАРКЕТ — HUD кнопка
+   ══════════════════════════════════ */
+.market-hud-btn {
+  position: absolute; z-index: 52;
+  right: 60px; top: 56px;
+  width: 44px; height: 36px;
+  border-radius: 8px;
+  background: rgba(0,15,10,0.88);
+  border: 1.5px solid rgba(0,200,80,0.5);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(0,200,80,0.2);
+}
+.market-hud-btn:active { transform: scale(0.9); }
+.market-hud-label { font-size: 7px; font-weight: bold; color: #00c850; letter-spacing: 0.5px; line-height: 1; font-family: 'Courier New', monospace; }
+
+/* ══════════════════════════════════
+   МАРКЕТ — модалка
+   ══════════════════════════════════ */
+.market-modal {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 0;
+}
+.market-modal.hidden { display: none; }
+.market-box {
+  background: #080814;
+  border: 1.5px solid rgba(0,200,80,0.3);
+  border-radius: 0 0 16px 16px;
+  width: 100%; max-width: 420px;
+  max-height: 92vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.market-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid rgba(0,200,80,0.15);
+  flex-shrink: 0;
+}
+.market-title { font-size: 13px; font-weight: bold; color: #00c850; font-family: 'Courier New', monospace; letter-spacing: 1px; }
+.market-close { background: none; border: none; color: #556; font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1; }
+.market-close:active { color: #fff; }
+.market-tabs {
+  display: flex; border-bottom: 1px solid rgba(0,200,80,0.1);
+  flex-shrink: 0;
+}
+.market-tab {
+  flex: 1; padding: 8px 0; font-size: 11px; font-family: 'Courier New', monospace;
+  background: none; border: none; color: #556; cursor: pointer;
+  border-bottom: 2px solid transparent; transition: color 0.15s;
+}
+.market-tab.active { color: #00c850; border-bottom-color: #00c850; }
+.market-filters {
+  display: flex; gap: 4px; padding: 8px 10px;
+  overflow-x: auto; flex-shrink: 0;
+  border-bottom: 1px solid rgba(0,200,80,0.07);
+}
+.market-filter-btn {
+  flex-shrink: 0; padding: 3px 10px; font-size: 10px;
+  font-family: 'Courier New', monospace; border-radius: 20px;
+  border: 1px solid #2a2a5a; background: rgba(255,255,255,0.02);
+  color: #556; cursor: pointer;
+}
+.market-filter-btn.active { border-color: #00c850; background: rgba(0,200,80,0.08); color: #00c850; }
+.market-body { flex: 1; overflow-y: auto; padding: 8px 10px 12px; }
+.market-listing {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px; padding: 8px 10px; margin-bottom: 6px;
+}
+.market-listing:last-child { margin-bottom: 0; }
+.market-listing-icon {
+  width: 40px; height: 40px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px; border: 1.5px solid rgba(255,255,255,0.1);
+  background: rgba(0,0,0,0.3);
+}
+.market-listing-info { flex: 1; min-width: 0; }
+.market-listing-name { font-size: 11px; color: #ccc; font-family: 'Courier New', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.market-listing-sub { font-size: 9px; color: #445; margin-top: 2px; }
+.market-listing-price { font-size: 11px; font-weight: bold; color: #a78bfa; font-family: 'Courier New', monospace; white-space: nowrap; }
+.market-buy-btn {
+  flex-shrink: 0; padding: 5px 10px; font-size: 10px;
+  font-family: 'Courier New', monospace; border-radius: 8px;
+  border: 1.5px solid #00c850; background: rgba(0,200,80,0.1);
+  color: #00c850; cursor: pointer;
+}
+.market-buy-btn:active { transform: scale(0.95); }
+.market-buy-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.market-cancel-btn {
+  flex-shrink: 0; padding: 5px 10px; font-size: 10px;
+  font-family: 'Courier New', monospace; border-radius: 8px;
+  border: 1.5px solid #e74c3c; background: rgba(231,76,60,0.08);
+  color: #e74c3c; cursor: pointer;
+}
+.market-cancel-btn:active { transform: scale(0.95); }
+.market-empty { text-align: center; color: #445; font-size: 12px; padding: 40px 0; }
+.market-loading { text-align: center; color: #445; font-size: 12px; padding: 30px 0; }
+.market-lot-timer { font-size: 8px; color: #445; margin-top: 1px; }
+
+/* Модалка продажи */
+.sell-modal {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,0.88);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.sell-modal.hidden { display: none; }
+.sell-box {
+  background: #0d0d1f;
+  border: 1.5px solid rgba(0,200,80,0.4);
+  border-radius: 14px;
+  width: 100%; max-width: 320px;
+  padding: 18px;
+}
+.sell-title { font-size: 13px; font-weight: bold; color: #00c850; font-family: 'Courier New', monospace; margin-bottom: 14px; text-align: center; }
+.sell-item-preview {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,0.03); border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.07);
+  padding: 10px; margin-bottom: 14px;
+}
+.sell-price-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.sell-price-input {
+  flex: 1; background: rgba(0,0,0,0.4); border: 1.5px solid rgba(0,200,80,0.3);
+  border-radius: 8px; color: #a78bfa; font-family: 'Courier New', monospace;
+  font-size: 14px; padding: 8px 10px; outline: none; text-align: center;
+}
+.sell-price-input:focus { border-color: #00c850; }
+.sell-commission-note { font-size: 10px; color: #445; text-align: center; margin-bottom: 14px; }
+.sell-actions { display: flex; gap: 8px; }
+.sell-confirm-btn {
+  flex: 1; padding: 10px; font-size: 12px;
+  font-family: 'Courier New', monospace; border-radius: 8px;
+  border: 1.5px solid #00c850; background: rgba(0,200,80,0.12);
+  color: #00c850; cursor: pointer;
+}
+.sell-confirm-btn:active { transform: scale(0.97); }
+.sell-cancel-btn {
+  flex: 1; padding: 10px; font-size: 12px;
+  font-family: 'Courier New', monospace; border-radius: 8px;
+  border: 1.5px solid #334; background: rgba(255,255,255,0.03);
+  color: #556; cursor: pointer;
+}
+
+/* Модалка разблокировки маркета */
+.market-unlock-modal {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,0.88);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.market-unlock-modal.hidden { display: none; }
+.market-unlock-box {
+  background: #0d0d1f;
+  border: 1.5px solid rgba(0,200,80,0.4);
+  border-radius: 14px;
+  width: 100%; max-width: 300px;
+  padding: 22px 18px;
+  text-align: center;
+}
+.market-unlock-icon { font-size: 36px; margin-bottom: 10px; }
+.market-unlock-title { font-size: 14px; font-weight: bold; color: #00c850; font-family: 'Courier New', monospace; margin-bottom: 8px; }
+.market-unlock-desc { font-size: 11px; color: #667; line-height: 1.5; margin-bottom: 16px; }
+.market-unlock-cost { font-size: 18px; font-weight: bold; color: #a78bfa; font-family: 'Courier New', monospace; margin-bottom: 16px; }
+.market-unlock-btn {
+  width: 100%; padding: 11px; font-size: 12px;
+  font-family: 'Courier New', monospace; border-radius: 8px;
+  border: 1.5px solid #00c850; background: rgba(0,200,80,0.12);
+  color: #00c850; cursor: pointer; margin-bottom: 8px;
+}
+.market-unlock-btn:active { transform: scale(0.97); }
+.market-unlock-close {
+  width: 100%; padding: 9px; font-size: 11px;
+  font-family: 'Courier New', monospace; border-radius: 8px;
+  border: 1.5px solid #223; background: none; color: #445; cursor: pointer;
+}
+
+/* ═══════════════════════════════
+   BOSS — модалка победы
+   ═══════════════════════════════ */
+.boss-victory-modal {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,0.88);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.boss-victory-modal.hidden { display: none; }
+.boss-victory-box {
+  background: #0d0d1f;
+  border: 2px solid #ffd700;
+  border-radius: 16px;
+  width: 100%; max-width: 340px;
+  max-height: 80vh; overflow-y: auto;
+  padding: 20px;
+  box-shadow: 0 0 40px rgba(255,215,0,0.25);
+}
+
+/* ══════════════════════════════════
+   PvP — HUD кнопка
+   ══════════════════════════════════ */
+.pvp-hud-btn {
+  position: absolute; z-index: 52;
+  right: 60px; top: 100px;
+  width: 44px; height: 36px;
+  border-radius: 8px;
+  background: rgba(5,5,20,0.90);
+  border: 1.5px solid rgba(160,100,255,0.6);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(160,100,255,0.3);
+}
+.pvp-hud-btn:active { transform: scale(0.9); }
+.pvp-hud-label { font-size: 7px; font-weight: bold; color: #a064ff; letter-spacing: 0.5px; line-height: 1; font-family: 'Courier New', monospace; }
+
+/* ══════════════════════════════════
+   PvP — Оверлей поиска
+   ══════════════════════════════════ */
+.pvp-search-overlay {
+  position: fixed; inset: 0; z-index: 350;
+  background: rgba(0,0,0,0.88);
+  display: flex; align-items: center; justify-content: center;
+}
+.pvp-search-overlay.hidden { display: none; }
+.pvp-search-box {
+  background: #080814;
+  border: 1.5px solid rgba(160,100,255,0.4);
+  border-radius: 14px;
+  width: 90%; max-width: 300px;
+  padding: 24px 18px; text-align: center;
+}
+.pvp-search-title { font-size: 14px; font-weight: bold; color: #a064ff; font-family: 'Courier New', monospace; letter-spacing: 1px; margin-bottom: 16px; }
+.pvp-search-anim  { font-size: 36px; margin-bottom: 12px; animation: pvpSpin 1.5s linear infinite; display: inline-block; }
+@keyframes pvpSpin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+.pvp-search-timer { font-size: 13px; color: #a064ff; font-family: 'Courier New', monospace; margin-bottom: 6px; }
+.pvp-search-cp    { font-size: 11px; color: #556; margin-bottom: 18px; }
+.pvp-cancel-btn {
+  padding: 9px 24px; font-size: 11px; font-family: 'Courier New', monospace;
+  border-radius: 8px; border: 1.5px solid #334;
+  background: rgba(255,255,255,0.03); color: #556; cursor: pointer;
+}
+.pvp-cancel-btn:active { color: #fff; border-color: #888; }
+
+/* ══════════════════════════════════
+   PvP — Боевой оверлей
+   ══════════════════════════════════ */
+.pvp-battle-overlay {
+  position: fixed; inset: 0; z-index: 340; pointer-events: none;
+}
+.pvp-battle-overlay.hidden { display: none; }
+.pvp-skills-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; padding: 10px 0 14px;
+  background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+  pointer-events: all;
+}
+.pvp-skill-btn {
+  width: 54px; height: 54px; border-radius: 10px;
+  border: 2px solid rgba(160,100,255,0.5);
+  background: rgba(10,5,20,0.85);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  cursor: pointer; position: relative; overflow: hidden; gap: 2px;
+}
+.pvp-skill-btn:active { transform: scale(0.92); }
+.pvp-skill-btn.oncd   { border-color: rgba(100,100,100,0.4); }
+.pvp-skill-btn.ready  { border-color: #a064ff; box-shadow: 0 0 8px rgba(160,100,255,0.4); }
+.pvp-surrender-btn {
+  position: absolute; top: 12px; right: 12px;
+  padding: 5px 10px; font-size: 10px;
+  font-family: 'Courier New', monospace; border-radius: 6px;
+  border: 1px solid rgba(231,76,60,0.4); background: rgba(231,76,60,0.08);
+  color: #e74c3c; cursor: pointer; pointer-events: all;
+}
+.pvp-surrender-btn:active { background: rgba(231,76,60,0.2); }
+.pvp-status-badge {
+  position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; color: #778; font-family: 'Courier New', monospace;
+  background: rgba(0,0,0,0.6); padding: 3px 10px; border-radius: 20px;
+  pointer-events: none;
+}
+
+/* ══════════════════════════════════
+   PvP — Результат
+   ══════════════════════════════════ */
+.pvp-result-modal {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,0.88);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.pvp-result-modal.hidden { display: none; }
+.pvp-result-box {
+  background: #0d0d1f; border-radius: 16px;
+  width: 100%; max-width: 300px; padding: 22px 18px; text-align: center;
+}
+.pvp-result-icon  { font-size: 48px; margin-bottom: 8px; }
+.pvp-result-title { font-size: 20px; font-weight: bold; font-family: 'Courier New', monospace; margin-bottom: 4px; }
+.pvp-result-sub   { font-size: 11px; color: #556; margin-bottom: 16px; }
+.pvp-result-stats { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 12px; margin-bottom: 16px; }
+.pvp-result-row   { display: flex; justify-content: space-between; font-size: 12px; font-family: 'Courier New', monospace; margin-bottom: 6px; }
+.pvp-result-row:last-child { margin-bottom: 0; }
+.pvp-result-close {
+  width: 100%; padding: 11px; font-size: 12px;
+  font-family: 'Courier New', monospace; border-radius: 8px;
+  border: 1.5px solid #334; background: rgba(255,255,255,0.03);
+  color: #aaa; cursor: pointer;
+}
+.pvp-result-close:active { color: #fff; }
