@@ -53,6 +53,10 @@ const G = {
   boss: { floor: 1, lastFightTime: 0 }, // lastFightTime = timestamp победы (ms)
   marketUnlocked: false,
   arenaRating: 1000,
+  pvpAttempts: 0,
+  pvpAttemptsDate: '',
+  pvpRefreshes: 0,
+  pvpRefreshDate: '',
 };
 
 // Базовые статы — отдельно, чтобы пересчитывать после снятия предметов

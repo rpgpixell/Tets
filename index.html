@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Pixel RPG</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <!--
   ══════════════════════════════════════════════════════
   index.html — Точка входа
@@ -293,22 +292,6 @@
     <span class="boss-hud-label">BOSS</span>
   </div>
 
-  <!-- PvP кнопка -->
-  <div id="pvpHudBtn" class="pvp-hud-btn" onclick="openPvp()" style="display:none;">
-    <svg width="18" height="18" viewBox="0 0 14 14" fill="none" style="image-rendering:pixelated">
-      <rect x="0" y="6" width="4" height="2" fill="#a064ff"/>
-      <rect x="1" y="4" width="2" height="2" fill="#a064ff"/>
-      <rect x="1" y="8" width="2" height="2" fill="#a064ff"/>
-      <rect x="10" y="6" width="4" height="2" fill="#a064ff"/>
-      <rect x="11" y="4" width="2" height="2" fill="#a064ff"/>
-      <rect x="11" y="8" width="2" height="2" fill="#a064ff"/>
-      <rect x="5" y="5" width="4" height="4" fill="#c890ff"/>
-      <rect x="6" y="3" width="2" height="2" fill="#a064ff"/>
-      <rect x="6" y="9" width="2" height="2" fill="#a064ff"/>
-    </svg>
-    <span class="pvp-hud-label">PvP</span>
-  </div>
-
   <div id="premModal" class="prem-modal hidden">
     <div class="prem-modal-box">
       <div class="prem-modal-header">
@@ -414,6 +397,9 @@
     </button>
     <button class="nav-btn" id="navFriends" onclick="switchTab('friends')">
       <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated"><rect x="1" y="1" width="5" height="5" fill="currentColor"/><rect x="0" y="3" width="1" height="3" fill="currentColor"/><rect x="6" y="3" width="1" height="3" fill="currentColor"/><rect x="1" y="6" width="5" height="4" fill="currentColor"/><rect x="9" y="2" width="5" height="5" fill="currentColor"/><rect x="8" y="4" width="1" height="3" fill="currentColor"/><rect x="14" y="4" width="1" height="3" fill="currentColor"/><rect x="9" y="7" width="5" height="4" fill="currentColor"/><rect x="2" y="10" width="3" height="5" fill="currentColor"/><rect x="10" y="11" width="3" height="4" fill="currentColor"/></svg></span>ДРУЗЬЯ
+    </button>
+    <button class="nav-btn" id="navPvp" onclick="switchTab('pvp')">
+      <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated"><rect x="7" y="0" width="2" height="5" fill="currentColor"/><rect x="5" y="2" width="6" height="2" fill="currentColor"/><rect x="0" y="6" width="5" height="2" fill="currentColor"/><rect x="2" y="4" width="2" height="6" fill="currentColor"/><rect x="11" y="6" width="5" height="2" fill="currentColor"/><rect x="12" y="4" width="2" height="6" fill="currentColor"/><rect x="4" y="10" width="8" height="5" fill="currentColor"/><rect x="6" y="8" width="4" height="4" fill="currentColor"/></svg></span>АРЕНА
     </button>
     <button class="nav-btn" id="navWallet" onclick="switchTab('wallet')">
       <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated"><rect x="2" y="5" width="12" height="10" fill="currentColor"/><rect x="2" y="3" width="8" height="4" fill="currentColor"/><rect x="3" y="2" width="6" height="2" fill="currentColor"/><rect x="10" y="4" width="4" height="4" fill="currentColor"/><rect x="11" y="5" width="2" height="2" fill="var(--dark)"/><rect x="4" y="8" width="4" height="4" fill="var(--dark)"/><rect x="5" y="9" width="2" height="2" fill="currentColor" opacity="0.6"/><rect x="9" y="8" width="3" height="3" fill="var(--dark)"/></svg></span>КОШЕЛЁК
@@ -621,6 +607,82 @@
     <div id="bossVictoryContent" class="boss-victory-box" onclick="event.stopPropagation()"></div>
   </div>
 
+  <!-- PvP Арена -->
+  <div class="panel" id="panelPvp">
+    <div class="panel-header">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated;vertical-align:middle;margin-right:6px">
+        <rect x="7" y="0" width="2" height="5" fill="currentColor"/>
+        <rect x="5" y="2" width="6" height="2" fill="currentColor"/>
+        <rect x="0" y="6" width="5" height="2" fill="currentColor"/>
+        <rect x="2" y="4" width="2" height="6" fill="currentColor"/>
+        <rect x="11" y="6" width="5" height="2" fill="currentColor"/>
+        <rect x="12" y="4" width="2" height="6" fill="currentColor"/>
+        <rect x="4" y="10" width="8" height="5" fill="currentColor"/>
+        <rect x="6" y="8" width="4" height="4" fill="currentColor"/>
+      </svg>
+      АРЕНА
+    </div>
+    <div class="pvp-tabs">
+      <button class="pvp-tab active" id="pvpTabBattle" onclick="switchPvpTab('battle')">⚔️ БОЙ</button>
+      <button class="pvp-tab" id="pvpTabRating" onclick="switchPvpTab('rating')">🏆 РЕЙТИНГ</button>
+      <button class="pvp-tab" id="pvpTabHistory" onclick="switchPvpTab('history')">📜 ИСТОРИЯ</button>
+    </div>
+    <div class="panel-body" id="pvpBody"></div>
+  </div>
+
+  <!-- PvP бой — оверлей поверх всего -->
+  <div id="pvpBattleOverlay" class="pvp-battle-overlay hidden">
+    <canvas id="pvpCanvas"></canvas>
+    <div id="pvpBattleHud" class="pvp-battle-hud">
+      <div class="pvp-fighter-info pvp-fighter-left">
+        <div class="pvp-fighter-name" id="pvpMyName">Вы</div>
+        <div class="pvp-hp-bar-wrap"><div class="pvp-hp-bar" id="pvpMyHp" style="width:100%"></div></div>
+        <div class="pvp-hp-text" id="pvpMyHpText">100/100</div>
+      </div>
+      <div class="pvp-timer-block">
+        <div class="pvp-timer" id="pvpTimer">60</div>
+        <div class="pvp-vs">VS</div>
+      </div>
+      <div class="pvp-fighter-info pvp-fighter-right">
+        <div class="pvp-fighter-name" id="pvpOppName">Противник</div>
+        <div class="pvp-hp-bar-wrap"><div class="pvp-hp-bar pvp-hp-bar-opp" id="pvpOppHp" style="width:100%"></div></div>
+        <div class="pvp-hp-text" id="pvpOppHpText">100/100</div>
+      </div>
+    </div>
+    <div id="pvpSkillsHud" class="pvp-skills-hud">
+      <div class="sk-btn" id="pvpSk0btn" onclick="pvpCastSkill(0)">
+        <span id="pvpSk0icon">?</span>
+        <div class="sk-cd-fill" id="pvpSk0fill" style="display:none"></div>
+        <div class="sk-cd-num"  id="pvpSk0cd"></div>
+        <div class="sk-locked-overlay" id="pvpSk0lock">📖</div>
+      </div>
+      <div class="sk-btn" id="pvpSk1btn" onclick="pvpCastSkill(1)">
+        <span id="pvpSk1icon">?</span>
+        <div class="sk-cd-fill" id="pvpSk1fill" style="display:none"></div>
+        <div class="sk-cd-num"  id="pvpSk1cd"></div>
+        <div class="sk-locked-overlay" id="pvpSk1lock">📖</div>
+      </div>
+      <div class="sk-btn" id="pvpSk2btn" onclick="pvpCastSkill(2)">
+        <span id="pvpSk2icon">?</span>
+        <div class="sk-cd-fill" id="pvpSk2fill" style="display:none"></div>
+        <div class="sk-cd-num"  id="pvpSk2cd"></div>
+        <div class="sk-locked-overlay" id="pvpSk2lock">📖</div>
+      </div>
+    </div>
+    <div id="pvpDmgLog" class="pvp-dmg-log"></div>
+  </div>
+
+  <!-- PvP результат -->
+  <div id="pvpResultOverlay" class="pvp-result-overlay hidden">
+    <div class="pvp-result-box">
+      <div class="pvp-result-icon" id="pvpResultIcon">⚔️</div>
+      <div class="pvp-result-title" id="pvpResultTitle">—</div>
+      <div class="pvp-result-sub" id="pvpResultSub">—</div>
+      <div class="pvp-result-rating" id="pvpResultRating">—</div>
+      <button class="pvp-result-btn" onclick="pvpCloseResult()">Закрыть</button>
+    </div>
+  </div>
+
 </div><!-- #app -->
 
 <!-- ══════════════════════════════════
@@ -693,57 +755,6 @@
         <button class="sell-cancel-btn" onclick="closeSellModal()">Отмена</button>
       </div>
     </div>
-  </div>
-
-
-  <!-- ═══════════════════════════════
-       PvP — Главная страница
-       ═══════════════════════════════ -->
-  <div id="pvpPage" class="pvp-page hidden">
-    <div class="pvp-page-header">
-      <button class="pvp-page-close" onclick="closePvpPage()">✕</button>
-      <span class="pvp-page-title">⚔️ PvP АРЕНА</span>
-      <span class="pvp-my-rating" id="pvpMyRating">★ —</span>
-    </div>
-    <div class="pvp-find-btn-wrap">
-      <button class="pvp-find-btn" id="pvpFindBtn" onclick="pvpStartFinding()">
-        <span style="font-size:28px;">⚔️</span>
-        <span>Найти противника</span>
-        <span style="font-size:11px;color:#c890ff;" id="pvpFindCp"></span>
-      </button>
-    </div>
-    <div class="pvp-page-tabs">
-      <button class="pvp-page-tab active" id="pvpTabRating"  onclick="switchPvpTab('rating')">Рейтинг</button>
-      <button class="pvp-page-tab"        id="pvpTabHistory" onclick="switchPvpTab('history')">История</button>
-    </div>
-    <div class="pvp-page-body" id="pvpPageBody">
-      <div style="text-align:center;color:#445;padding:30px;">Загрузка...</div>
-    </div>
-  </div>
-
-  <!-- PvP — Оверлей поиска (поверх страницы) -->
-  <div id="pvpSearchOverlay" class="pvp-search-overlay hidden">
-    <div class="pvp-search-box">
-      <div class="pvp-search-title">⚔️ ПОИСК СОПЕРНИКА</div>
-      <div class="pvp-search-anim">⚔️</div>
-      <div class="pvp-search-timer" id="pvpSearchTimer">0:00</div>
-      <div class="pvp-search-cp" id="pvpSearchCp"></div>
-      <button class="pvp-cancel-btn" onclick="pvpCancelSearch()">Отмена</button>
-    </div>
-  </div>
-
-  <!-- PvP — Боевой оверлей -->
-  <div id="pvpBattleOverlay" class="pvp-battle-overlay hidden">
-    <div class="pvp-status-badge" id="pvpStatusBadge"></div>
-    <div class="pvp-battle-bottom">
-      <div class="pvp-skills-bar" id="pvpSkillsBar"></div>
-      <button class="pvp-surrender-btn" onclick="pvpSurrender()">🏳 Сдаться</button>
-    </div>
-  </div>
-
-  <!-- PvP — Результат -->
-  <div id="pvpResultModal" class="pvp-result-modal hidden">
-    <div class="pvp-result-box" id="pvpResultBox"></div>
   </div>
 
 </body>

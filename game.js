@@ -735,12 +735,6 @@ function flashRed() {
 var _loopRunning = false;
 
 function loop(ts) {
-  // PvP сцена — перехватываем loop
-  if (typeof pvpRenderState !== 'undefined' && pvpRenderState.active) {
-    renderPvp(ts);
-    requestAnimationFrame(loop);
-    return;
-  }
   const dt = Math.min((ts - lastTime) / 1000, 0.1);
   lastTime = ts;
   update(dt);

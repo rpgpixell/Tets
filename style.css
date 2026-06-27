@@ -1543,154 +1543,247 @@ html, body {
   box-shadow: 0 0 40px rgba(255,215,0,0.25);
 }
 
-/* ══════════════════════════════════
-   PvP — HUD кнопка
-   ══════════════════════════════════ */
-.pvp-hud-btn {
-  position: absolute; z-index: 52;
-  right: 60px; top: 100px;
-  width: 44px; height: 36px;
-  border-radius: 8px;
-  background: rgba(5,5,20,0.90);
-  border: 1.5px solid rgba(160,100,255,0.6);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px; cursor: pointer;
-  box-shadow: 0 0 10px rgba(160,100,255,0.3);
-}
-.pvp-hud-btn:active { transform: scale(0.9); }
-.pvp-hud-label { font-size: 7px; font-weight: bold; color: #a064ff; letter-spacing: 0.5px; line-height: 1; font-family: 'Courier New', monospace; }
+/* ═══════════════════════════════
+   PVP АРЕНА
+   ═══════════════════════════════ */
 
-/* ══════════════════════════════════
-   PvP — Оверлей поиска
-   ══════════════════════════════════ */
-.pvp-search-overlay {
-  position: fixed; inset: 0; z-index: 350;
-  background: rgba(0,0,0,0.88);
+/* Вкладки PvP */
+.pvp-tabs {
+  display: flex; gap: 4px;
+  padding: 8px 14px 0;
+  background: rgba(10,10,25,0.92);
+  border-bottom: 1px solid #2a2a5a;
+  padding-top: 76px;
+}
+.pvp-tab {
+  flex: 1; padding: 8px 4px; font-size: 11px;
+  font-family: 'Courier New', monospace;
+  border-radius: 6px 6px 0 0;
+  border: 1.5px solid #2a2a5a; border-bottom: none;
+  background: rgba(255,255,255,0.03);
+  color: #556; cursor: pointer;
+  transition: color .2s, background .2s;
+}
+.pvp-tab.active {
+  background: rgba(231,76,60,0.12);
+  border-color: #e74c3c55;
+  color: #e74c3c;
+}
+/* Переопределяем panel-header для pvp (скрываем дефолтный, заменяем tabs) */
+#panelPvp .panel-header {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+#panelPvp .panel-body { padding-top: 10px; }
+
+/* Карточка противника */
+.pvp-opp-card {
+  border: 1.5px solid #2a2a5a;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: rgba(255,255,255,0.03);
+  display: flex; align-items: center; gap: 12px;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.pvp-opp-card:active { background: rgba(231,76,60,0.08); border-color: #e74c3c55; }
+.pvp-opp-card.selected {
+  border-color: #e74c3c;
+  background: rgba(231,76,60,0.10);
+  box-shadow: 0 0 10px rgba(231,76,60,0.2);
+}
+.pvp-opp-avatar {
+  width: 44px; height: 44px; border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid #2a2a5a;
   display: flex; align-items: center; justify-content: center;
+  font-size: 22px; flex-shrink: 0;
+  overflow: hidden;
 }
-.pvp-search-overlay.hidden { display: none; }
-.pvp-search-box {
-  background: #080814;
-  border: 1.5px solid rgba(160,100,255,0.4);
-  border-radius: 14px;
-  width: 90%; max-width: 300px;
-  padding: 24px 18px; text-align: center;
-}
-.pvp-search-title { font-size: 14px; font-weight: bold; color: #a064ff; font-family: 'Courier New', monospace; letter-spacing: 1px; margin-bottom: 16px; }
-.pvp-search-anim  { font-size: 36px; margin-bottom: 12px; animation: pvpSpin 1.5s linear infinite; display: inline-block; }
-@keyframes pvpSpin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
-.pvp-search-timer { font-size: 13px; color: #a064ff; font-family: 'Courier New', monospace; margin-bottom: 6px; }
-.pvp-search-cp    { font-size: 11px; color: #556; margin-bottom: 18px; }
-.pvp-cancel-btn {
-  padding: 9px 24px; font-size: 11px; font-family: 'Courier New', monospace;
-  border-radius: 8px; border: 1.5px solid #334;
-  background: rgba(255,255,255,0.03); color: #556; cursor: pointer;
-}
-.pvp-cancel-btn:active { color: #fff; border-color: #888; }
+.pvp-opp-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.pvp-opp-info { flex: 1; min-width: 0; }
+.pvp-opp-name { font-size: 13px; color: #ddd; font-weight: bold; }
+.pvp-opp-sub  { font-size: 10px; color: #556; margin-top: 2px; }
+.pvp-opp-rating { font-size: 14px; font-weight: bold; color: #f5c542; text-align: right; flex-shrink: 0; }
 
-/* ══════════════════════════════════
-   PvP — Боевой оверлей
-   ══════════════════════════════════ */
+/* Кнопки боя */
+.pvp-fight-btn {
+  width: 100%; padding: 13px; font-size: 14px;
+  font-family: 'Courier New', monospace; border-radius: 10px;
+  border: 2px solid #e74c3c; background: rgba(231,76,60,0.15);
+  color: #e74c3c; cursor: pointer; font-weight: bold;
+  letter-spacing: 1px; margin-top: 8px;
+  transition: background .2s;
+}
+.pvp-fight-btn:active { background: rgba(231,76,60,0.28); }
+.pvp-fight-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pvp-refresh-btn {
+  width: 100%; padding: 9px; font-size: 11px;
+  font-family: 'Courier New', monospace; border-radius: 8px;
+  border: 1.5px solid #2a2a5a; background: rgba(255,255,255,0.04);
+  color: #778; cursor: pointer; margin-top: 6px;
+}
+.pvp-refresh-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Счётчики */
+.pvp-counters {
+  display: flex; gap: 8px; margin-bottom: 12px;
+}
+.pvp-counter-box {
+  flex: 1; padding: 8px; border-radius: 8px;
+  border: 1px solid #2a2a5a; background: rgba(255,255,255,0.03);
+  text-align: center;
+}
+.pvp-counter-val { font-size: 20px; font-weight: bold; color: #f5c542; }
+.pvp-counter-label { font-size: 9px; color: #556; margin-top: 2px; }
+
+/* ── PvP бой — оверлей ── */
 .pvp-battle-overlay {
-  position: fixed; inset: 0; z-index: 340; pointer-events: none;
+  position: fixed; inset: 0; z-index: 200;
+  background: #0d0d1a;
+  display: flex; flex-direction: column;
 }
 .pvp-battle-overlay.hidden { display: none; }
-.pvp-battle-bottom {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  display: flex; flex-direction: column; align-items: center;
-  background: linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.5) 70%, transparent 100%);
-  padding-bottom: 10px;
-  pointer-events: all;
+
+#pvpCanvas {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  image-rendering: pixelated;
 }
-.pvp-skills-bar {
-  display: flex; align-items: center; justify-content: center;
-  gap: 10px; padding: 12px 0 8px;
-  pointer-events: all;
-  width: 100%;
+
+.pvp-battle-hud {
+  position: absolute; top: 0; left: 0; right: 0;
+  z-index: 10;
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 10px 8px;
+  background: linear-gradient(180deg,rgba(4,4,18,0.97) 0%,rgba(6,6,22,0.0) 100%);
 }
-.pvp-skill-btn {
-  width: 54px; height: 54px; border-radius: 10px;
-  border: 2px solid rgba(160,100,255,0.5);
-  background: rgba(10,5,20,0.85);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  cursor: pointer; position: relative; overflow: hidden; gap: 2px;
+.pvp-fighter-info {
+  flex: 1; min-width: 0;
 }
-.pvp-skill-btn:active { transform: scale(0.92); }
-.pvp-skill-btn.oncd   { border-color: rgba(100,100,100,0.4); }
-.pvp-skill-btn.ready  { border-color: #a064ff; box-shadow: 0 0 8px rgba(160,100,255,0.4); }
-.pvp-surrender-btn {
-  padding: 6px 22px; font-size: 11px;
-  font-family: 'Courier New', monospace; border-radius: 6px;
-  border: 1px solid rgba(231,76,60,0.4); background: rgba(231,76,60,0.08);
-  color: #e74c3c; cursor: pointer; pointer-events: all;
-  margin-top: 2px; margin-bottom: 4px;
+.pvp-fighter-left { text-align: left; }
+.pvp-fighter-right { text-align: right; }
+.pvp-fighter-name {
+  font-size: 11px; color: #ddd; font-weight: bold;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 4px;
 }
-.pvp-surrender-btn:active { background: rgba(231,76,60,0.2); }
-.pvp-status-badge {
-  position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
-  font-size: 10px; color: #778; font-family: 'Courier New', monospace;
-  background: rgba(0,0,0,0.6); padding: 3px 10px; border-radius: 20px;
+.pvp-hp-bar-wrap {
+  height: 8px; background: rgba(10,10,30,0.8);
+  border-radius: 4px; overflow: hidden;
+  border: 1px solid rgba(60,60,100,0.4);
+}
+.pvp-hp-bar {
+  height: 100%;
+  background: linear-gradient(90deg,#8B0000,#e74c3c,#ff6b6b);
+  border-radius: 4px;
+  transition: width 0.25s;
+}
+.pvp-hp-bar-opp {
+  background: linear-gradient(90deg,#ff6b6b,#e74c3c,#8B0000);
+  /* инвертируем для противника (bar справа налево) */
+  transform-origin: right;
+}
+.pvp-hp-text { font-size: 9px; color: #aaa; margin-top: 2px; }
+
+.pvp-timer-block {
+  flex-shrink: 0; text-align: center; min-width: 40px;
+}
+.pvp-timer {
+  font-size: 20px; font-weight: bold; color: #f5c542;
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 8px rgba(245,197,66,0.6);
+}
+.pvp-vs { font-size: 9px; color: #556; letter-spacing: 2px; }
+
+/* Скиллы в PvP */
+.pvp-skills-hud {
+  position: absolute; bottom: 80px; left: 8px;
+  z-index: 15;
+  display: flex; flex-direction: column; gap: 5px;
+}
+
+/* Лог урона в PvP */
+.pvp-dmg-log {
+  position: absolute; right: 8px; bottom: 90px;
+  z-index: 15;
+  display: flex; flex-direction: column-reverse; gap: 3px;
   pointer-events: none;
+  max-height: 140px; overflow: hidden;
+}
+.pvp-dmg-entry {
+  font-size: 11px; font-family: 'Courier New', monospace;
+  padding: 2px 6px;
+  background: rgba(0,0,0,0.55);
+  border-radius: 4px; color: #ddd;
+  animation: pvpLogFade 0.3s ease-out;
+}
+@keyframes pvpLogFade {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
 }
 
-/* ══════════════════════════════════
-   PvP — Результат
-   ══════════════════════════════════ */
-.pvp-result-modal {
-  position: fixed; inset: 0; z-index: 400;
+/* Результат боя */
+.pvp-result-overlay {
+  position: fixed; inset: 0; z-index: 250;
   background: rgba(0,0,0,0.88);
-  display: flex; align-items: center; justify-content: center; padding: 20px;
+  display: flex; align-items: center; justify-content: center;
 }
-.pvp-result-modal.hidden { display: none; }
+.pvp-result-overlay.hidden { display: none; }
 .pvp-result-box {
-  background: #0d0d1f; border-radius: 16px;
-  width: 100%; max-width: 300px; padding: 22px 18px; text-align: center;
+  background: #0d0d1f;
+  border-radius: 16px;
+  padding: 30px 24px;
+  text-align: center;
+  width: 90%; max-width: 320px;
 }
-.pvp-result-icon  { font-size: 48px; margin-bottom: 8px; }
-.pvp-result-title { font-size: 20px; font-weight: bold; font-family: 'Courier New', monospace; margin-bottom: 4px; }
-.pvp-result-sub   { font-size: 11px; color: #556; margin-bottom: 16px; }
-.pvp-result-stats { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 12px; margin-bottom: 16px; }
-.pvp-result-row   { display: flex; justify-content: space-between; font-size: 12px; font-family: 'Courier New', monospace; margin-bottom: 6px; }
-.pvp-result-row:last-child { margin-bottom: 0; }
-.pvp-result-close {
-  width: 100%; padding: 11px; font-size: 12px;
-  font-family: 'Courier New', monospace; border-radius: 8px;
-  border: 1.5px solid #334; background: rgba(255,255,255,0.03);
-  color: #aaa; cursor: pointer;
+.pvp-result-icon { font-size: 56px; margin-bottom: 10px; }
+.pvp-result-title {
+  font-size: 22px; font-weight: bold; letter-spacing: 2px;
+  font-family: 'Courier New', monospace; margin-bottom: 6px;
 }
-.pvp-result-close:active { color: #fff; }
+.pvp-result-sub { font-size: 12px; color: #778; margin-bottom: 8px; }
+.pvp-result-rating {
+  font-size: 18px; font-weight: bold; color: #f5c542;
+  margin-bottom: 18px;
+}
+.pvp-result-btn {
+  width: 100%; padding: 12px; font-size: 13px;
+  font-family: 'Courier New', monospace; border-radius: 10px;
+  border: 1.5px solid #e74c3c; background: rgba(231,76,60,0.12);
+  color: #e74c3c; cursor: pointer;
+}
 
-/* ══════════════════════════════════
-   PvP — Главная страница
-   ══════════════════════════════════ */
-.pvp-page { position:fixed;inset:0;z-index:290;background:#080814;display:flex;flex-direction:column;overflow:hidden; }
-.pvp-page.hidden { display:none; }
-.pvp-page-header { display:flex;align-items:center;padding:12px 14px 10px;border-bottom:1px solid rgba(160,100,255,0.2);flex-shrink:0; }
-.pvp-page-close  { background:none;border:none;color:#556;font-size:18px;cursor:pointer;margin-right:10px;line-height:1; }
-.pvp-page-close:active { color:#fff; }
-.pvp-page-title  { flex:1;font-size:13px;font-weight:bold;color:#a064ff;font-family:'Courier New',monospace;letter-spacing:1px; }
-.pvp-my-rating   { font-size:12px;color:#a78bfa;font-family:'Courier New',monospace;font-weight:bold; }
-.pvp-find-btn-wrap { padding:14px 14px 10px;flex-shrink:0; }
-.pvp-find-btn {
-  width:100%;padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:4px;
-  border-radius:12px;border:2px solid rgba(160,100,255,0.6);background:rgba(160,100,255,0.08);
-  font-family:'Courier New',monospace;font-size:14px;font-weight:bold;color:#c890ff;cursor:pointer;
-  box-shadow:0 0 18px rgba(160,100,255,0.15);
+/* Рейтинговые строки арены */
+.pvp-rating-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin-bottom: 6px;
+  border-radius: 8px; border: 1px solid #1a1a35;
+  background: rgba(255,255,255,0.03);
 }
-.pvp-find-btn:active { transform:scale(0.97);background:rgba(160,100,255,0.15); }
-.pvp-find-btn.searching { border-color:rgba(160,100,255,0.3);color:#778;cursor:default; }
-.pvp-page-tabs { display:flex;flex-shrink:0;border-bottom:1px solid rgba(160,100,255,0.1); }
-.pvp-page-tab { flex:1;padding:8px 0;font-size:11px;font-family:'Courier New',monospace;background:none;border:none;color:#556;cursor:pointer;border-bottom:2px solid transparent; }
-.pvp-page-tab.active { color:#a064ff;border-bottom-color:#a064ff; }
-.pvp-page-body { flex:1;overflow-y:auto;padding:8px 10px 16px; }
-.pvp-rank-row { display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:4px;background:rgba(255,255,255,0.03); }
-.pvp-rank-row.me { background:rgba(160,100,255,0.1);border:1px solid rgba(160,100,255,0.3); }
-.pvp-rank-num  { font-size:11px;color:#445;font-family:'Courier New',monospace;width:22px;text-align:center; }
-.pvp-rank-name { flex:1;font-size:12px;color:#ccc;font-family:'Courier New',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-.pvp-rank-val  { font-size:12px;color:#a78bfa;font-family:'Courier New',monospace;font-weight:bold; }
-.pvp-hist-row  { display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:4px;background:rgba(255,255,255,0.03); }
-.pvp-hist-result { font-size:11px;font-weight:bold;font-family:'Courier New',monospace;width:36px;text-align:center;border-radius:4px;padding:2px 0; }
-.pvp-hist-result.win  { color:#2ecc71;background:rgba(46,204,113,0.1); }
-.pvp-hist-result.loss { color:#e74c3c;background:rgba(231,76,60,0.1); }
-.pvp-hist-name  { flex:1;font-size:11px;color:#aaa;font-family:'Courier New',monospace;overflow:hidden;text-overflow:ellipsis; }
-.pvp-hist-change { font-size:11px;font-family:'Courier New',monospace;font-weight:bold; }
+.pvp-rating-rank {
+  font-size: 13px; font-weight: bold; color: #f5c542;
+  min-width: 24px; text-align: center;
+}
+.pvp-rating-name { flex: 1; font-size: 12px; color: #ddd; }
+.pvp-rating-val {
+  font-size: 13px; font-weight: bold; color: #ff6060;
+  min-width: 46px; text-align: right;
+}
+
+/* История боёв */
+.pvp-history-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px; margin-bottom: 6px;
+  border-radius: 8px; border: 1px solid #1a1a35;
+  background: rgba(255,255,255,0.03);
+}
+.pvp-hist-result {
+  font-size: 18px; flex-shrink: 0;
+}
+.pvp-hist-info { flex: 1; min-width: 0; }
+.pvp-hist-opp  { font-size: 11px; color: #ddd; }
+.pvp-hist-time { font-size: 9px; color: #445; margin-top: 2px; }
+.pvp-hist-pts  { font-size: 13px; font-weight: bold; flex-shrink: 0; }
+
