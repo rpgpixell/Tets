@@ -2036,8 +2036,179 @@ var _pvpConnected      = false;
 
 var _pvpPendingSearch = false; // ждём авторизации перед поиском
 
+// ── PvP Лобби ──
+var _pvpTab = 'rating';
+var _pvpRatingCache = null;
+var _pvpRatingCacheTime = 0;
+var _pvpHistoryCache = null;
+var _pvpHistoryCacheTime = 0;
+
 function openPvp() {
-  // Показываем оверлей поиска сразу
+  recalcStats(); // убеждаемся что статы актуальные перед показом страницы
+  var page = document.getElementById('pvpPage');
+  if (page) page.classList.remove('hidden');
+  // Показываем текущий рейтинг
+  var ratingEl = document.getElementById('pvpMyRating');
+  if (ratingEl) ratingEl.textContent = '★ ' + (G.arenaRating || 1000);
+  // Показываем CP
+  var cpEl = document.getElementById('pvpFindCp');
+  if (cpEl) cpEl.textContent = 'Ваш CP: ' + calcCP();
+  // Загружаем данные активного таба
+  _pvpTab = 'rating';
+  _pvpActivateTab('rating');
+  _pvpLoadTabData('rating');
+  // Коннектимся к серверу в фоне (без поиска)
+  if (!_pvpConnected && window.GameSync && PvpClient) {
+    _pvpConnectHandlers();
+    PvpClient.connect(window.GameSync._API, window.GameSync._INIT);
+    _pvpConnected = true;
+  }
+}
+
+function closePvpPage() {
+  var page = document.getElementById('pvpPage');
+  if (page) page.classList.add('hidden');
+}
+
+function switchPvpTab(tab) {
+  _pvpTab = tab;
+  _pvpActivateTab(tab);
+  _pvpLoadTabData(tab);
+}
+
+function _pvpActivateTab(tab) {
+  var tabs = ['rating', 'history'];
+  tabs.forEach(function(t) {
+    var btn = document.getElementById('pvpTab' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+}
+
+function _pvpLoadTabData(tab) {
+  if (!window.GameSync || !window.GameSync.state.online) {
+    document.getElementById('pvpPageBody').innerHTML =
+      '<div style="text-align:center;color:#445;padding:30px;font-size:12px;">📱 Доступно только в Telegram</div>';
+    return;
+  }
+  if (tab === 'rating') _pvpLoadRating();
+  else _pvpLoadHistory();
+}
+
+function _pvpLoadRating() {
+  var body = document.getElementById('pvpPageBody');
+  if (_pvpRatingCache && Date.now() - _pvpRatingCacheTime < 30000) {
+    _pvpRenderRating(_pvpRatingCache.top, _pvpRatingCache.myRating, body);
+    return;
+  }
+  body.innerHTML = '<div style="text-align:center;color:#445;padding:30px;font-size:12px;">⏳ Загрузка...</div>';
+  var API = window.GameSync._API, INIT = window.GameSync._INIT;
+  fetch(API + '/api/pvp/rating', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData: INIT })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (!d.ok) { body.innerHTML = '<div style="text-align:center;color:#e74c3c;padding:30px;">❌ Ошибка загрузки</div>'; return; }
+    _pvpRatingCache = d;
+    _pvpRatingCacheTime = Date.now();
+    // Обновляем рейтинг в шапке
+    var rEl = document.getElementById('pvpMyRating');
+    if (rEl) rEl.textContent = '★ ' + d.myRating;
+    G.arenaRating = d.myRating;
+    _pvpRenderRating(d.top, d.myRating, body);
+  })
+  .catch(function() { body.innerHTML = '<div style="text-align:center;color:#e74c3c;padding:30px;">❌ Нет соединения</div>'; });
+}
+
+function _pvpRenderRating(top, myRating, body) {
+  var charEmojis = { fire: '🔥', light: '✨', water: '💧' };
+  var medals = ['🥇', '🥈', '🥉'];
+  var tgId = window.GameSync ? window.GameSync.getTgId() : null;
+
+  var html = '<div style="margin-bottom:10px;padding:10px;background:rgba(167,139,250,0.08);border:1px solid #4a3a8a;border-radius:8px;display:flex;align-items:center;justify-content:space-between;">' +
+    '<span style="font-size:12px;color:#a78bfa;">★ Мой рейтинг</span>' +
+    '<span style="font-size:18px;font-weight:bold;color:#f5c542;font-family:\'Courier New\',monospace;">' + myRating + '</span>' +
+    '</div>';
+
+  if (!top || !top.length) {
+    html += '<div style="text-align:center;color:#445;padding:30px;font-size:12px;">👥 Пока нет игроков</div>';
+    body.innerHTML = html; return;
+  }
+
+  top.forEach(function(p, i) {
+    var isMe = p.tgId && tgId && p.tgId === tgId;
+    var medal = i < 3 ? medals[i] : (i + 1) + '.';
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:9px 10px;margin-bottom:5px;border-radius:8px;' +
+      'background:' + (isMe ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.03)') + ';' +
+      'border:1px solid ' + (isMe ? '#6a4aaa' : '#1a1a35') + ';">' +
+      '<span style="font-size:14px;min-width:26px;text-align:center;">' + medal + '</span>' +
+      '<span style="flex:1;font-size:12px;color:' + (isMe ? '#dda0ff' : '#ccd') + ';">' + p.name + '</span>' +
+      '<span style="font-size:12px;color:#f5c542;font-family:\'Courier New\',monospace;">★ ' + p.rating + '</span>' +
+      '</div>';
+  });
+
+  body.innerHTML = html;
+}
+
+function _pvpLoadHistory() {
+  var body = document.getElementById('pvpPageBody');
+  if (_pvpHistoryCache && Date.now() - _pvpHistoryCacheTime < 30000) {
+    _pvpRenderHistory(_pvpHistoryCache, body);
+    return;
+  }
+  body.innerHTML = '<div style="text-align:center;color:#445;padding:30px;font-size:12px;">⏳ Загрузка...</div>';
+  var API = window.GameSync._API, INIT = window.GameSync._INIT;
+  fetch(API + '/api/pvp/history', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData: INIT })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (!d.ok) { body.innerHTML = '<div style="text-align:center;color:#e74c3c;padding:30px;">❌ Ошибка загрузки</div>'; return; }
+    _pvpHistoryCache = d.history;
+    _pvpHistoryCacheTime = Date.now();
+    _pvpRenderHistory(d.history, body);
+  })
+  .catch(function() { body.innerHTML = '<div style="text-align:center;color:#e74c3c;padding:30px;">❌ Нет соединения</div>'; });
+}
+
+function _pvpRenderHistory(history, body) {
+  var charEmojis = { fire: '🔥', light: '✨', water: '💧' };
+  var reasonText = { killed: 'убит', surrender: 'сдался', disconnect: 'отключился' };
+
+  if (!history || !history.length) {
+    body.innerHTML = '<div style="text-align:center;color:#445;padding:40px;font-size:12px;">⚔️ Боёв ещё нет<br><span style="font-size:10px;color:#334;">Сыграй первый бой!</span></div>';
+    return;
+  }
+
+  var html = '';
+  history.forEach(function(b) {
+    var isWin = b.result === 'win';
+    var color = isWin ? '#2ecc71' : '#e74c3c';
+    var icon  = isWin ? '🏆' : '💀';
+    var ts    = b.createdAt ? new Date(b.createdAt).toLocaleDateString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+    var ratingTxt = (b.ratingChange >= 0 ? '+' : '') + b.ratingChange;
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:9px 10px;margin-bottom:6px;border-radius:8px;' +
+      'background:rgba(255,255,255,0.03);border:1px solid ' + (isWin ? '#1a4a2a' : '#4a1a1a') + ';">' +
+      '<span style="font-size:18px;">' + icon + '</span>' +
+      '<span style="font-size:16px;">' + (charEmojis[b.opponentCharId] || '👤') + '</span>' +
+      '<div style="flex:1;">' +
+        '<div style="font-size:12px;color:#ccd;">' + (b.opponentName || 'Игрок') + '</div>' +
+        '<div style="font-size:10px;color:#445;">' + (reasonText[b.reason] || b.reason) + ' · ' + ts + '</div>' +
+      '</div>' +
+      '<div style="text-align:right;">' +
+        '<div style="font-size:13px;font-weight:bold;color:' + color + ';">' + ratingTxt + '</div>' +
+        (isWin && b.pixrReward ? '<div style="font-size:10px;color:#ff44cc;">+' + b.pixrReward + ' 💎</div>' : '') +
+      '</div>' +
+    '</div>';
+  });
+
+  body.innerHTML = html;
+}
+
+function pvpStartFinding() {
+  // Обновляем CP в оверлее поиска
+  recalcStats();
   _pvpSearchSeconds = 0;
   var overlay = document.getElementById('pvpSearchOverlay');
   if (overlay) overlay.classList.remove('hidden');
@@ -2047,14 +2218,13 @@ function openPvp() {
   if (!_pvpConnected) {
     var API  = window.GameSync._API;
     var init = window.GameSync._INIT;
-    _pvpPendingSearch = true;   // встанем в очередь как только придёт 'authed'
-    _pvpConnectHandlers();      // вешаем handlers ДО connect
+    _pvpPendingSearch = true;
+    _pvpConnectHandlers();
     PvpClient.connect(API, init);
     _pvpConnected = true;
   } else if (PvpClient.isConnected()) {
     _pvpDoJoinQueue();
   } else {
-    // Уже подключались, но сокет переподключается
     _pvpPendingSearch = true;
   }
 }
@@ -2068,7 +2238,9 @@ function _pvpDoJoinQueue() {
     if (el) el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
     if (_pvpSearchSeconds >= 60) clearInterval(_pvpSearchTimer);
   }, 1000);
-  PvpClient.joinQueue(calcCP());
+  // Пересчитываем статы перед отправкой — берём АКТУАЛЬНЫЕ (экипировка + апгрейды)
+  recalcStats();
+  PvpClient.joinQueue(calcCP(), G.stats, G.maxHp);
 }
 
 function _pvpConnectHandlers() {
@@ -2103,16 +2275,11 @@ function _pvpConnectHandlers() {
     pvpRenderState.fighters[1].hp    = d.hp[1];
     pvpRenderState.fighters[0].maxHp = d.maxHp[0];
     pvpRenderState.fighters[1].maxHp = d.maxHp[1];
-    var el = document.getElementById('pvpStatusBadge');
-    if (el) el.textContent = '';
   });
   PvpClient.on('disconnected', function() {
-    // Показываем badge только если бой активен
-    if (_pvpRoomId) {
-      var el = document.getElementById('pvpStatusBadge');
-      if (el) el.textContent = '🔄 Переподключение...';
-    }
-    // Реконнект в комнату происходит автоматически в net.js после pvp_authed
+    var el = document.getElementById('pvpStatusBadge');
+    if (el) el.textContent = '🔄 Переподключение...';
+    setTimeout(function() { if (_pvpRoomId) PvpClient.reconnect(); }, 2000);
   });
 }
 
@@ -2245,6 +2412,9 @@ function _pvpOnEnd(d) {
   G.arenaRating = Math.max(0, (G.arenaRating || 1000) + myChange);
   if (isWinner) G.pixr = (G.pixr || 0) + (d.pixrReward || 1);
   if (window.GameSync) window.GameSync.saveInstant();
+  // Сбрасываем кеш истории и рейтинга чтобы обновились при следующем открытии
+  _pvpHistoryCache = null; _pvpHistoryCacheTime = 0;
+  _pvpRatingCache = null;  _pvpRatingCacheTime  = 0;
   setTimeout(function() {
     pvpRenderState.active = false;
     var bo = document.getElementById('pvpBattleOverlay');
@@ -2278,4 +2448,11 @@ function pvpSurrender() {
 function pvpCloseResult() {
   var el = document.getElementById('pvpResultModal');
   if (el) el.classList.add('hidden');
+  // Обновляем данные страницы арены
+  var ratingEl = document.getElementById('pvpMyRating');
+  if (ratingEl) ratingEl.textContent = '★ ' + (G.arenaRating || 1000);
+  var cpEl = document.getElementById('pvpFindCp');
+  if (cpEl) cpEl.textContent = 'Ваш CP: ' + calcCP();
+  if (_pvpTab === 'history') _pvpLoadHistory();
+  else _pvpLoadRating();
 }
