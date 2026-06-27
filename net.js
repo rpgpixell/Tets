@@ -158,6 +158,7 @@
       specialTasksClaimed: clone(G.specialTasksClaimed || {}),
       invFilter:           G.invFilter || 'all',
       cp:                  (typeof calcCP === 'function') ? calcCP() : 0,
+      arenaRating:         G.arenaRating || 1000,
       updatedAt:           Date.now(),
     };
   }
@@ -237,6 +238,8 @@
     G.boss = d.boss || { floor: 1, lastFightTime: 0 };
     if (!G.boss.floor) G.boss.floor = 1;
     G.marketUnlocked = d.marketUnlocked || false;
+
+    G.arenaRating = (typeof d.arenaRating === 'number') ? d.arenaRating : (G.arenaRating || 1000);
 
     G.invFilter = d.invFilter || 'all';
     G.dailyTasks = d.dailyTasks || { date: '', seconds: 0, claimed: [] };

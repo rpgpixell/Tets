@@ -145,17 +145,17 @@ const MarketListing = mongoose.model('MarketListing', MarketListingSchema);
 
 // ── История PvP боёв ──
 const PvpBattleSchema = new mongoose.Schema({
-  roomId:     { type: String, required: true, unique: true },
-  winnerTgId: { type: String, required: true, index: true },
-  loserTgId:  { type: String, required: true, index: true },
-  winnerName: { type: String, default: '' },
-  loserName:  { type: String, default: '' },
+  roomId:       { type: String, required: true, unique: true },
+  winnerTgId:   { type: String, required: true, index: true },
+  loserTgId:    { type: String, required: true, index: true },
+  winnerName:   { type: String, default: '' },
+  loserName:    { type: String, default: '' },
   winnerCharId: { type: String, default: 'fire' },
   loserCharId:  { type: String, default: 'fire' },
-  reason:     { type: String, default: 'killed' },
+  reason:       { type: String, default: 'killed' },
   ratingChange: { type: Number, default: 0 },
-  pixrReward: { type: Number, default: 0 },
-  createdAt:  { type: Number, default: Date.now },
+  pixrReward:   { type: Number, default: 0 },
+  createdAt:    { type: Number, default: Date.now },
 });
 PvpBattleSchema.index({ winnerTgId: 1, createdAt: -1 });
 PvpBattleSchema.index({ loserTgId:  1, createdAt: -1 });
@@ -490,7 +490,7 @@ app.post('/api/save', async (req, res) => {
         return res.json({ ok: true, updatedAt: serverUpdatedAt, ignored: true });
       }
 
-      // ✅ Защита от перезаписи админских изменений
+      // ✅ Защита от перезаписи AdminUpdatedAt
       const adminUpdatedAt = (currentDoc.data._adminUpdatedAt) || 0;
       if (adminUpdatedAt > clientUpdatedAt) {
         console.log(`🛡️ [save] Мёрж с админскими изменениями для ${tg.id}`);
@@ -499,6 +499,16 @@ app.post('/api/save', async (req, res) => {
         if (currentDoc.data.pixr      !== undefined) data.pixr      = currentDoc.data.pixr;
         if (currentDoc.data.inventory !== undefined) data.inventory = currentDoc.data.inventory;
         data._adminUpdatedAt = adminUpdatedAt;
+      }
+
+      // ✅ Защита arenaRating — PvP сервер обновляет его напрямую через $inc,
+      // клиент может прислать устаревшее значение — берём максимум
+      const srvRating = currentDoc.data.arenaRating;
+      const cliRating = data.arenaRating;
+      if (typeof srvRating === 'number' && typeof cliRating === 'number') {
+        data.arenaRating = Math.max(srvRating, cliRating);
+      } else if (typeof srvRating === 'number') {
+        data.arenaRating = srvRating;
       }
     }
 
@@ -2575,20 +2585,25 @@ async function pvpEndRoom(room, winIdx, reason) {
   var wr = winner.arenaRating||1000, lr = loser.arenaRating||1000;
   var wg = wr >= lr ? PVP_WIN_LOW  : PVP_WIN_HIGH;
   var ll = wr >= lr ? PVP_LOSE_HIGH: PVP_LOSE_LOW;
-  io.to(room.roomId).emit('pvp_end', { winnerId:winner.tgId, reason, winnerIdx:winIdx, winnerRating:wr+wg, loserRating:Math.max(0,lr-ll), ratingChange:[wg,-ll], pixrReward:PVP_REWARD_PIXR });
+  // Убеждаемся что рейтинг не уйдёт ниже 0
+  var newLoserRating = Math.max(0, lr - ll);
+  var actualLl = lr - newLoserRating; // реальное снижение (может быть меньше ll)
+  io.to(room.roomId).emit('pvp_end', { winnerId:winner.tgId, reason, winnerIdx:winIdx, winnerRating:wr+wg, loserRating:newLoserRating, ratingChange:[wg,-actualLl], pixrReward:PVP_REWARD_PIXR });
   try {
     await Save.findOneAndUpdate({tgId:winner.tgId},{$inc:{'data.pixr':PVP_REWARD_PIXR,'data.arenaRating':wg}});
-    await Save.findOneAndUpdate({tgId:loser.tgId}, {$inc:{'data.arenaRating':-ll}});
+    // $inc может дать отрицательный рейтинг — после применяем $max
+    await Save.findOneAndUpdate({tgId:loser.tgId}, {$inc:{'data.arenaRating':-actualLl}});
+    await Save.findOneAndUpdate({tgId:loser.tgId}, {$max:{'data.arenaRating':0}});
     await PvpBattle.create({
-      roomId: room.roomId,
-      winnerTgId: winner.tgId, loserTgId: loser.tgId,
-      winnerName: winner.name, loserName: loser.name,
+      roomId:       room.roomId,
+      winnerTgId:   winner.tgId,   loserTgId:   loser.tgId,
+      winnerName:   winner.name,   loserName:   loser.name,
       winnerCharId: winner.charId, loserCharId: loser.charId,
       reason, ratingChange: wg, pixrReward: PVP_REWARD_PIXR,
       createdAt: Date.now(),
     });
   } catch(e) { console.error('❌ [pvp] rating save:', e.message); }
-  console.log(`🏆 [pvp] ${winner.tgId} победил ${loser.tgId} (${reason})`);
+  console.log(`🏆 [pvp] ${winner.tgId} победил ${loser.tgId} (${reason}), +${wg}/-${actualLl}`);
   pvpRooms.delete(room.roomId);
 }
 
@@ -2756,9 +2771,13 @@ io.on('connection', function(socket) {
 app.post('/api/pvp/rating', async (req, res) => {
   const tg = authUser(req, res); if (!tg) return;
   try {
-    const top = await Save.find({},{'data.arenaRating':1,firstName:1,username:1}).sort({'data.arenaRating':-1}).limit(50).lean();
+    const top = await Save.find({},{'data.arenaRating':1,firstName:1,username:1,tgId:1}).sort({'data.arenaRating':-1}).limit(50).lean();
     const me  = await Save.findOne({tgId:tg.id},{'data.arenaRating':1}).lean();
-    res.json({ ok:true, top:top.map(function(u,i){return{rank:i+1,name:u.firstName||u.username||'Игрок',rating:u.data&&u.data.arenaRating||1000};}), myRating:me&&me.data&&me.data.arenaRating||1000 });
+    res.json({
+      ok: true,
+      top: top.map(function(u,i){ return { rank:i+1, name:u.firstName||u.username||'Игрок', rating:u.data&&u.data.arenaRating||1000, tgId:u.tgId }; }),
+      myRating: me&&me.data&&typeof me.data.arenaRating==='number' ? me.data.arenaRating : 1000,
+    });
   } catch(e) { res.status(500).json({ok:false,error:e.message}); }
 });
 
@@ -2772,14 +2791,13 @@ app.post('/api/pvp/history', async (req, res) => {
     const list = battles.map(function(b) {
       const isWin = b.winnerTgId === myId;
       return {
-        result: isWin ? 'win' : 'loss',
-        opponentName: isWin ? b.loserName : b.winnerName,
+        result:         isWin ? 'win' : 'loss',
+        opponentName:   isWin ? b.loserName   : b.winnerName,
         opponentCharId: isWin ? b.loserCharId : b.winnerCharId,
-        myCharId: isWin ? b.winnerCharId : b.loserCharId,
-        ratingChange: isWin ? b.ratingChange : -b.ratingChange,
-        pixrReward: isWin ? b.pixrReward : 0,
-        reason: b.reason,
-        createdAt: b.createdAt,
+        ratingChange:   isWin ? b.ratingChange : -b.ratingChange,
+        pixrReward:     isWin ? b.pixrReward : 0,
+        reason:         b.reason,
+        createdAt:      b.createdAt,
       };
     });
     res.json({ ok: true, history: list });
