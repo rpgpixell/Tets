@@ -734,9 +734,11 @@
 
   <!-- PvP — Боевой оверлей -->
   <div id="pvpBattleOverlay" class="pvp-battle-overlay hidden">
-    <button class="pvp-surrender-btn" onclick="pvpSurrender()">🏳 Сдаться</button>
     <div class="pvp-status-badge" id="pvpStatusBadge"></div>
-    <div class="pvp-skills-bar" id="pvpSkillsBar"></div>
+    <div class="pvp-battle-bottom">
+      <div class="pvp-skills-bar" id="pvpSkillsBar"></div>
+      <button class="pvp-surrender-btn" onclick="pvpSurrender()">🏳 Сдаться</button>
+    </div>
   </div>
 
   <!-- PvP — Результат -->

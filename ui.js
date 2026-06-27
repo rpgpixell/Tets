@@ -2293,6 +2293,17 @@ function pvpCancelSearch() {
   _pvpHideSearch();
 }
 
+// Скрывает/показывает все HUD кнопки справа во время PvP боя
+function _pvpSetHudVisible(visible) {
+  var ids = ['bpHudBtn', 'taskHudBtn', 'bossHudBtn', 'marketHudBtn', 'pvpHudBtn'];
+  ids.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = visible ? 'flex' : 'none';
+  });
+  var premBtn = document.querySelector('.prem-hud-btn');
+  if (premBtn) premBtn.style.display = visible ? 'flex' : 'none';
+}
+
 function _pvpStartBattle(d) {
   var myCharId  = G_CHAR ? G_CHAR.id : 'fire';
   var oppCharId = d.opponent.charId || 'fire';
@@ -2313,6 +2324,7 @@ function _pvpStartBattle(d) {
     hp: d.maxHp[1], maxHp: d.maxHp[1], animTime: 0, state: 'fight', hitFlash: 0, buffs: {}, debuffs: {},
   };
   _pvpSkillCooldowns = {};
+  _pvpSetHudVisible(false); // скрываем HUD кнопки во время боя
   var bo = document.getElementById('pvpBattleOverlay');
   if (bo) bo.classList.remove('hidden');
   _pvpBuildSkillsBar();
@@ -2417,6 +2429,7 @@ function _pvpOnEnd(d) {
     pvpRenderState.active = false;
     var bo = document.getElementById('pvpBattleOverlay');
     if (bo) bo.classList.add('hidden');
+    _pvpSetHudVisible(true); // возвращаем HUD кнопки после боя
     var rm = { killed: isWinner ? (_pvpOpponentName+' повержен') : 'Вы повержены', surrender: isWinner ? (_pvpOpponentName+' сдался') : 'Вы сдались', disconnect: isWinner ? (_pvpOpponentName+' отключился') : 'Вы отключились' };
     var html =
       '<div class="pvp-result-icon">'+(isWinner?'🏆':'💀')+'</div>'+
