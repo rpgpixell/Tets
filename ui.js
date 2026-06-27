@@ -2220,18 +2220,18 @@ function pvpStartFight() {
   _pvpBattle = {
     myHpMax:   G.maxHp,
     myHp:      G.maxHp,
-    oppHpMax:  _pvpCalcOppHp(opp),
-    oppHp:     _pvpCalcOppHp(opp),
+    oppHpMax:  opp.maxHp || opp.stats.hp || 100,
+    oppHp:     opp.maxHp || opp.stats.hp || 100,
     myAtk:     G.stats.atk,
     myDef:     G.stats.def,
     myCrit:    G.stats.crit,
     myDodge:   G.stats.dodge,
     myAtkSpd:  G.stats.atkSpd || 1.0,
-    oppAtk:    _pvpCalcOppAtk(opp),
-    oppDef:    _pvpCalcOppDef(opp),
-    oppCrit:   _pvpCalcOppCrit(opp),
-    oppDodge:  _pvpCalcOppDef(opp) * 0.3,
-    oppAtkSpd: (opp.stats && opp.stats.atkSpd) || (opp.baseStats && opp.baseStats.atkSpd) || 1.0,
+    oppAtk:    opp.stats.atk   || 10,
+    oppDef:    opp.stats.def   || 5,
+    oppCrit:   opp.stats.crit  || 5,
+    oppDodge:  opp.stats.dodge || 3,
+    oppAtkSpd: opp.stats.atkSpd || 1.0,
     myAtkTimer:  0,
     oppAtkTimer: 0,
     mySkillCds:  [0, 0, 0],
@@ -2278,34 +2278,6 @@ function _pvpGetMyName() {
     if (unsafe && unsafe.user) return unsafe.user.first_name || 'Вы';
   } catch(e) {}
   return 'Вы';
-}
-
-// ── Вычисление статов противника из его сохранёнки ──
-function _pvpCalcOppHp(opp) {
-  var base = (opp.baseStats && opp.baseStats.hp) || (opp.stats && opp.stats.hp) || 100;
-  var eq   = _pvpOppEquipBonus(opp, 'hp');
-  return Math.max(50, Math.floor(base + eq));
-}
-function _pvpCalcOppAtk(opp) {
-  var base = (opp.baseStats && opp.baseStats.atk) || (opp.stats && opp.stats.atk) || 10;
-  var eq   = _pvpOppEquipBonus(opp, 'atk');
-  return Math.max(1, Math.floor(base + eq));
-}
-function _pvpCalcOppDef(opp) {
-  var base = (opp.baseStats && opp.baseStats.def) || (opp.stats && opp.stats.def) || 5;
-  var eq   = _pvpOppEquipBonus(opp, 'def');
-  return Math.max(0, Math.floor(base + eq));
-}
-function _pvpCalcOppCrit(opp) {
-  var base = (opp.baseStats && opp.baseStats.crit) || (opp.stats && opp.stats.crit) || 5;
-  var eq   = _pvpOppEquipBonus(opp, 'crit');
-  return Math.max(0, Math.floor(base + eq));
-}
-function _pvpOppEquipBonus(opp, stat) {
-  // opp.equipped — объект { slot: itemId } (id, не объект)
-  // У нас нет полных данных предметов противника — используем только stats если переданы
-  if (opp.stats && opp.stats[stat] !== undefined) return 0; // уже полные статы
-  return 0;
 }
 
 // ── Базовый урон за удар ──

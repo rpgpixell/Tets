@@ -1153,7 +1153,7 @@ app.post('/api/wallet/exchange', async (req, res) => {
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEBAPP_URL = process.env.WEBAPP_URL || 'https://your-domain.railway.app';
-const API_URL = process.env.API_URL || 'https://tets-production-4fdc.up.railway.app';
+const API_URL = process.env.API_URL || 'https://ghz-production.up.railway.app';
 
 let bot = null;
 
@@ -2388,6 +2388,86 @@ app.post('/api/upgrade', async (req, res) => {
 //  PvP АРЕНА
 // ═══════════════════════════════
 
+// Базовые статы персонажей (зеркало data.js CHARS.baseStats)
+const CHARS_BASE = {
+  fire:  { atk: 18, def: 4,  spd: 3,  hp: 85,  crit: 6,  dodge: 3, atkSpd: 1.2, critDmg: 0 },
+  light: { atk: 8,  def: 14, spd: 3,  hp: 130, crit: 4,  dodge: 4, atkSpd: 0.8, critDmg: 0 },
+  water: { atk: 12, def: 6,  spd: 4,  hp: 95,  crit: 22, dodge: 5, atkSpd: 1.0, critDmg: 0 },
+};
+
+// Зеркало UPG_DEFS из data.js
+const UPG_DEFS_SRV = [
+  { id: 'atk',     stat: 'atk',     bonus: 3    },
+  { id: 'def',     stat: 'def',     bonus: 2    },
+  { id: 'hp',      stat: 'hp',      bonus: 15   },
+  { id: 'spd',     stat: 'spd',     bonus: 1    },
+  { id: 'atkSpd',  stat: 'atkSpd',  bonus: 0.15 },
+  { id: 'crit',    stat: 'crit',    bonus: 3    },
+  { id: 'critDmg', stat: 'critDmg', bonus: 0.1  },
+  { id: 'dodge',   stat: 'dodge',   bonus: 2    },
+];
+
+// Пересчёт полных статов игрока (база + улучшения + уровень + экипировка)
+// Зеркало логики applySnapshot + recalcStats с клиента
+function calcFullStats(data) {
+  const charId = data.charId;
+  const charBase = CHARS_BASE[charId];
+  if (!charBase) return data.stats || {};
+
+  // 1. Начинаем с базы персонажа
+  const base = Object.assign({}, charBase);
+
+  // 2. Применяем улучшения (upg)
+  const upg = data.upg || {};
+  UPG_DEFS_SRV.forEach(u => {
+    const lv = upg[u.id] || 0;
+    if (lv > 0) {
+      base[u.stat] = parseFloat(((base[u.stat] || 0) + u.bonus * lv).toFixed(4));
+    }
+  });
+
+  // 3. Бонусы уровня (как в applySnapshot)
+  const lvBonuses = (data.level || 1) - 1;
+  if (lvBonuses > 0) {
+    base.atk    = (base.atk    || 0) + lvBonuses * 2;
+    base.def    = (base.def    || 0) + lvBonuses * 1;
+    base.hp     = (base.hp     || 0) + lvBonuses * 10;
+    base.atkSpd = parseFloat(((base.atkSpd || 1.0) + lvBonuses * 0.02).toFixed(4));
+  }
+
+  // 4. Суммируем бонусы от экипировки
+  // inventory хранит полные объекты, equipped хранит id предметов
+  const inventory = data.inventory || [];
+  const equipped  = data.equipped  || {};
+  const EQUIP_SLOTS = ['weapon','body','legs','gloves','belt','ring','boots','helmet'];
+  const bonus = { atk: 0, def: 0, hp: 0, spd: 0, crit: 0, dodge: 0, atkSpd: 0, critDmg: 0 };
+
+  EQUIP_SLOTS.forEach(slot => {
+    const itemId = equipped[slot];
+    if (!itemId) return;
+    // Ищем предмет в инвентаре по id
+    const item = inventory.find(i => i.id === itemId);
+    if (!item || !item.stats) return;
+    Object.keys(item.stats).forEach(stat => {
+      bonus[stat] = (bonus[stat] || 0) + (item.stats[stat] || 0);
+    });
+  });
+
+  // 5. Итоговые статы
+  const stats = {};
+  ['atk','def','hp','spd','crit','dodge','atkSpd','critDmg'].forEach(s => {
+    stats[s] = (base[s] || 0) + (bonus[s] || 0);
+  });
+  stats.hp    = Math.floor(stats.hp);
+  stats.atk   = Math.floor(stats.atk);
+  stats.def   = Math.floor(stats.def);
+  stats.crit  = Math.floor(stats.crit);
+  stats.dodge = Math.floor(stats.dodge);
+  stats.atkSpd = parseFloat((stats.atkSpd || 1.0).toFixed(4));
+
+  return stats;
+}
+
 // Получить 3 случайных противника из рейтинга ±200 очков
 app.post('/api/pvp/opponents', async (req, res) => {
   const tg = authUser(req, res);
@@ -2423,18 +2503,20 @@ app.post('/api/pvp/opponents', async (req, res) => {
       const j = Math.floor(Math.random() * (i + 1));
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
     }
-    const chosen = candidates.slice(0, 3).map(p => ({
-      tgId:     p.tgId,
-      name:     p.firstName || p.username || 'Игрок',
-      charId:   (p.data && p.data.charId) || p.charId,
-      level:    (p.data && p.data.level) || 1,
-      rating:   (p.data && p.data.arenaRating) || 1000,
-      stats:    (p.data && p.data.stats) || {},
-      baseStats:(p.data && p.data.baseStats) || {},
-      upg:      (p.data && p.data.upg) || {},
-      skills:   (p.data && p.data.skills) || {},
-      equipped: (p.data && p.data.equipped) || {},
-    }));
+    const chosen = candidates.slice(0, 3).map(p => {
+      const d = p.data || {};
+      const fullStats = calcFullStats(d);
+      return {
+        tgId:     p.tgId,
+        name:     p.firstName || p.username || 'Игрок',
+        charId:   d.charId || p.charId,
+        level:    d.level  || 1,
+        rating:   d.arenaRating || 1000,
+        stats:    fullStats,
+        maxHp:    fullStats.hp || 100,
+        skills:   d.skills || {},
+      };
+    });
 
     res.json({ ok: true, opponents: chosen, myRating });
   } catch (e) {
