@@ -2245,9 +2245,8 @@ function pvpStartFight() {
     oppAnimState: 'idle',
     myAnimTimer:  0,
     oppAnimTimer: 0,
-    myFrame:      0,
-    oppFrame:     0,
-    frameTimer:   0,
+    mySpriteTime:  0,   // накапливаемое время для расчёта кадра (как spriteRunTime)
+    oppSpriteTime: 0,
     dmgPops:      [],  // { x, y, text, color, life, maxLife }
   };
 
@@ -2492,10 +2491,11 @@ function _pvpUpdate(dt) {
   b.timeLeft -= dt;
   if (b.timeLeft <= 0) { b.timeLeft = 0; _pvpEndBattle(); return; }
 
-  // Анимационные таймеры
-  b.frameTimer += dt;
-  if (b.frameTimer > 0.12) { b.myFrame++; b.oppFrame++; b.frameTimer = 0; }
-  if (b.myAnimState === 'atk')  { b.myAnimTimer  -= dt; if (b.myAnimTimer  <= 0) { b.myAnimState  = 'idle'; } }
+  // Накапливаем время для анимации (как spriteRunTime в render.js)
+  b.mySpriteTime  += dt;
+  b.oppSpriteTime += dt;
+
+  if (b.myAnimState  === 'atk') { b.myAnimTimer  -= dt; if (b.myAnimTimer  <= 0) { b.myAnimState  = 'idle'; } }
   if (b.oppAnimState === 'atk') { b.oppAnimTimer -= dt; if (b.oppAnimTimer <= 0) { b.oppAnimState = 'idle'; } }
 
   // Дебаффы/баффы
@@ -2681,20 +2681,25 @@ function _pvpRender() {
 
   ctx2.imageSmoothingEnabled = false;
 
+  // FPS констант анимации (зеркало render.js)
+  var IDLE_FPS_PVP = 8, ATK_FPS_PVP = 20;
+
   // ── Рисуем ИГРОКА ──
   if (G_CHAR && typeof spriteRun !== 'undefined') {
     var mySpr, myFr, myFW, myFH;
     if (b.myAnimState === 'atk') {
       mySpr = spriteAtk;
-      var _AF = window.ATK_FRAMES_CUR || 8;
-      var _AFW = window.ATK_FW_CUR || 128;
-      myFr  = Math.min(_AF - 1, Math.floor((1 - b.myAnimTimer / 0.4) * _AF));
+      var _AF  = window.ATK_FRAMES_CUR  || 8;
+      var _AFW = window.ATK_FW_CUR      || 128;
+      // Кадр атаки: прогресс от 0 до 1 за время анимации (как в render.js)
+      myFr = Math.min(_AF - 1, Math.floor((1 - b.myAnimTimer / 0.4) * _AF));
       myFW = _AFW; myFH = 128;
     } else {
       mySpr = spriteIdle;
-      var _IF = window.IDLE_FRAMES_CUR || 7;
-      var _IFW = window.IDLE_FW_CUR || 128;
-      myFr  = b.myFrame % _IF;
+      var _IF  = window.IDLE_FRAMES_CUR || 7;
+      var _IFW = window.IDLE_FW_CUR     || 128;
+      // Кадр idle: по времени * IDLE_FPS (как spriteRunTime * IDLE_FPS в render.js)
+      myFr = Math.floor(b.mySpriteTime * IDLE_FPS_PVP) % _IF;
       myFW = _IFW; myFH = 128;
     }
     if (mySpr && mySpr.complete && mySpr.naturalWidth > 0) {
@@ -2707,21 +2712,27 @@ function _pvpRender() {
   if (opp && opp.charId) {
     var oppChar = CHARS[opp.charId];
     if (oppChar) {
-      // Используем спрайты противника
-      var oppIdleSrc = oppChar.idleSrc;
-      var oppAtkSrc  = oppChar.atkSrc;
       if (!_pvpOppImgs) _pvpOppImgs = {};
-      if (!_pvpOppImgs[opp.charId + '_idle']) {
-        _pvpOppImgs[opp.charId + '_idle'] = new Image();
-        _pvpOppImgs[opp.charId + '_idle'].src = oppIdleSrc;
-        _pvpOppImgs[opp.charId + '_atk']  = new Image();
-        _pvpOppImgs[opp.charId + '_atk'].src  = oppAtkSrc;
+      var oppIdleKey = opp.charId + '_idle';
+      var oppAtkKey  = opp.charId + '_atk';
+      if (!_pvpOppImgs[oppIdleKey]) {
+        _pvpOppImgs[oppIdleKey] = new Image();
+        _pvpOppImgs[oppIdleKey].src = oppChar.idleSrc;
+        _pvpOppImgs[oppAtkKey]  = new Image();
+        _pvpOppImgs[oppAtkKey].src  = oppChar.atkSrc;
       }
-      var oppSprKey = b.oppAnimState === 'atk' ? '_atk' : '_idle';
-      var oppSpr = _pvpOppImgs[opp.charId + oppSprKey];
-      var oppFrCount = b.oppAnimState === 'atk' ? (oppChar.atkFrames || 8) : (oppChar.idleFrames || 7);
-      var oppFW = b.oppAnimState === 'atk' ? (oppChar.atkFW || 128) : (oppChar.idleFW || 128);
-      var oppFr = b.oppFrame % oppFrCount;
+      var isOppAtk   = b.oppAnimState === 'atk';
+      var oppSpr     = _pvpOppImgs[isOppAtk ? oppAtkKey : oppIdleKey];
+      var oppFrCount = isOppAtk ? (oppChar.atkFrames || 8) : (oppChar.idleFrames || 7);
+      var oppFW      = isOppAtk ? (oppChar.atkFW    || 128) : (oppChar.idleFW   || 128);
+      var oppFr;
+      if (isOppAtk) {
+        // Кадр атаки: прогресс как у игрока
+        oppFr = Math.min(oppFrCount - 1, Math.floor((1 - b.oppAnimTimer / 0.4) * oppFrCount));
+      } else {
+        // Кадр idle: по времени * IDLE_FPS
+        oppFr = Math.floor(b.oppSpriteTime * IDLE_FPS_PVP) % oppFrCount;
+      }
 
       ctx2.save();
       ctx2.translate(oppX + SPRITE_W / 2, 0);
