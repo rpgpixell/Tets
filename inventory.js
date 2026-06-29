@@ -61,15 +61,26 @@ function generateItem(floor) {
     type = ITEM_TYPES[Math.floor(Math.random() * ITEM_TYPES.length)];
   }
 
+  // Капы для вторичных статов на предмет
+  var STAT_CAP = { crit: 5, dodge: 5 };
+  // critDmg генерируется отдельно как дробное (зависит от редкости)
+  var CRITDMG_BY_RARITY = { common: 0.05, uncommon: 0.08, rare: 0.12, epic: 0.18, legend: 0.25 };
+
   var stats = {};
   type.stats.forEach(function(s) {
+    if (s === 'critDmg') {
+      var cdVal = parseFloat(((CRITDMG_BY_RARITY[rarity.id] || 0.05) * (0.85 + Math.random() * 0.3)).toFixed(2));
+      if (cdVal > 0) stats[s] = cdVal;
+      return;
+    }
     var isPrimary = (s === type.primary);
     var val = Math.floor(base * mult * (isPrimary ? 1.0 : 0.45) * (0.85 + Math.random() * 0.3));
+    if (STAT_CAP[s] !== undefined) val = Math.min(val, STAT_CAP[s]);
     if (val > 0) stats[s] = val;
   });
-  // Легендарный — дополнительный случайный стат
+  // Легендарный — дополнительный случайный стат (только основные)
   if (rarity.id === 'legend') {
-    var bonus = ['atk','def','hp','crit','dodge','spd'].filter(function(s) { return !stats[s]; });
+    var bonus = ['atk','def','hp','spd'].filter(function(s) { return !stats[s]; });
     if (bonus.length) stats[bonus[Math.floor(Math.random() * bonus.length)]] = Math.floor(base * 0.5);
   }
 
@@ -118,13 +129,101 @@ function tryDropSkillBook(floor) {
 }
 
 // ── Попытка выдать предмет после убийства монстра ──
+// inventory.js — строка ~220 (найдите и замените)
+
 function tryDropItem(floor) {
+  // Проверяем соединение
+  if (!window.GameSync || !window.GameSync.state || !window.GameSync.state.online) {
+    return;
+  }
+  
   tryDropSkillBook(floor);
+  
   if (Math.random() > dropChance(floor) * premMult('drop')) return;
   if (G.inventory.length >= 40) return;
-  var item = generateItem(floor);
-  G.inventory.push(item);
-  showDropNotif(item);
+  
+  var API = window.GameSync._API;
+  var init = window.GameSync._INIT;
+  
+  fetch(API + '/api/drop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData: init, floor: floor })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.ok) {
+      // Используем функцию из net.js для синхронизации
+      if (typeof window.GameSync.syncInventory === 'function') {
+        window.GameSync.syncInventory(data.inventory);
+      } else {
+        // fallback
+        G.inventory = data.inventory;
+      }
+      if (data.gold !== undefined) G.gold = data.gold;
+      if (data.pixr !== undefined) G.pixr = data.pixr;
+      showDropNotif(data.item);
+      updateHUD();
+      if (activeTab === 'inv') renderInventory();
+    }
+  })
+  .catch(function() {
+    showDmgPop('❌ Ошибка дропа', W * 0.4, GROUND * 0.4, '#e74c3c');
+  });
+}
+
+// ── Дроп руды после убийства монстра ──
+// inventory.js — строка ~240 (найдите и замените)
+
+function tryDropOre(floor) {
+  if (!window.GameSync || !window.GameSync.state || !window.GameSync.state.online) return;
+  
+  if (!G.ore) G.ore = {};
+  var table = ORE_DROP_TABLE[Math.min(floor, 10)] || ORE_DROP_TABLE[10];
+  
+  var droppedOres = {};
+  ORE_TYPES.forEach(function(ore) {
+    var chance = table[ore.id] || 0;
+    if (chance <= 0 || Math.random() * 100 >= chance) return;
+    var qty = 1 + Math.floor(Math.random() * 3);
+    droppedOres[ore.id] = qty;
+  });
+  
+  if (Object.keys(droppedOres).length === 0) return;
+  
+  var API = window.GameSync._API;
+  var init = window.GameSync._INIT;
+  
+  fetch(API + '/api/drop/ore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData: init, floor: floor, ores: droppedOres })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.ok) {
+      G.ore = data.ore;
+      if (activeTab === 'craft') renderCraft();
+      if (activeTab === 'inv') renderInventory();
+      
+      Object.keys(droppedOres).forEach(function(oreId) {
+        var ore = ORE_TYPES.find(function(o) { return o.id === oreId; });
+        if (!ore) return;
+        var qty = droppedOres[oreId];
+        var r = RARITIES.find(function(x) { return x.id === ore.rarity; }) || { color: '#888' };
+        var el = document.createElement('div');
+        el.className = 'drop-notif';
+        el.innerHTML =
+          '<span><img src="' + ore.icon + '" style="width:18px;height:18px;object-fit:contain;vertical-align:middle;image-rendering:pixelated;" onerror="this.style.opacity=0"></span>' +
+          '<span style="color:' + r.color + '">' + ore.name + ' ×' + qty + '</span>';
+        document.getElementById('app').appendChild(el);
+        setTimeout(function() { el.remove(); }, 2000);
+      });
+    }
+  })
+  .catch(function() {
+    showDmgPop('❌ Ошибка дропа руды', W * 0.4, GROUND * 0.4, '#e74c3c');
+  });
 }
 
 // ── Уведомление о новом дропе ──
@@ -145,11 +244,15 @@ function showDropNotif(item) {
 
 // Суммарный бонус от надетых предметов
 function equippedStats() {
-  var bonus = { atk: 0, def: 0, hp: 0, spd: 0, crit: 0, dodge: 0 };
+  var bonus = { atk: 0, def: 0, hp: 0, spd: 0, crit: 0, dodge: 0, critDmg: 0 };
   Object.values(G.equipped).forEach(function(item) {
     if (!item) return;
     Object.keys(item.stats).forEach(function(s) { bonus[s] = (bonus[s] || 0) + item.stats[s]; });
   });
+  // Суммарные капы с предметов
+  bonus.crit    = Math.min(bonus.crit,    10);
+  bonus.dodge   = Math.min(bonus.dodge,   10);
+  bonus.critDmg = Math.min(bonus.critDmg, 0.5);
   return bonus;
 }
 
@@ -161,7 +264,7 @@ function recalcStats() {
   G.stats.def    = base.def    + bonus.def;
   G.stats.spd    = base.spd    + bonus.spd;
   G.stats.crit   = base.crit   + bonus.crit;
-  G.stats.critDmg = base.critDmg || 0;
+  G.stats.critDmg = (base.critDmg || 0) + bonus.critDmg;
   G.stats.dodge  = base.dodge  + bonus.dodge;
   G.stats.atkSpd = (base.atkSpd || 1.0) + (bonus.atkSpd || 0);
   var oldMaxHp   = G.maxHp;
@@ -211,48 +314,120 @@ function destroyItem(itemId) {
 // ═══════════════════════════════
 //  ЗАТОЧКА ПРЕДМЕТОВ (+1..+10)
 // ═══════════════════════════════
-// Шанс успеха: +0=75%, +1=60%, +2=50% ... +9=2%
+//  ЗАТОЧКА ПРЕДМЕТОВ (+1..+15)
+// ═══════════════════════════════
+// REFINE_CHANCES_V2 / REFINE_MAX_V2 / REFINE_GOLD_COST — из data.js
+// REFINE_CHANCES и REFINE_MAX оставлены для совместимости (книги навыков)
 var REFINE_CHANCES = [75, 60, 50, 40, 30, 20, 12, 7, 4, 2];
 var REFINE_MAX     = 10;
 
-function refineCost(refLv)         { return Math.floor(50 * Math.pow(2, refLv)); }
-function refineStatBonus(refLv)    { return Math.floor(3 * Math.pow(1.5, refLv)); }
-function refineSuccessChance(refLv){ return REFINE_CHANCES[Math.min(refLv, REFINE_CHANCES.length - 1)]; }
+function refineCost(refLv)         { return REFINE_GOLD_COST[Math.min(refLv, REFINE_GOLD_COST.length - 1)]; }
+function refineStatBonus(refLv)    { return refLv < 5 ? 3 : 10; }
+function refineSuccessChance(refLv){ return REFINE_CHANCES_V2[Math.min(refLv, REFINE_CHANCES_V2.length - 1)]; }
 function refineStars(item)         { return item.isSkillBook ? REFINE_MAX : (item.refine || 0); }
 function refineStarsStr(n) {
   if (n === 0) return '✧✧✧✧✧✧✧✧✧✧';
-  return '★'.repeat(n) + '✧'.repeat(Math.max(0, REFINE_MAX - n));
+  var show = Math.min(n, 10);
+  var tail = n > 10 ? '<sup style="color:#f5c542;font-size:9px">+' + (n - 10) + '</sup>' : '✧'.repeat(10 - show);
+  return '★'.repeat(show) + tail;
 }
 
-// ── Попытка заточить предмет ──
-function refineItem(itemId) {
+// ── Открыть модал выбора типа заточки ──
+function refineItem(itemId) { openRefineModal(itemId); }
+
+function openRefineModal(itemId) {
   var item = G.inventory.find(function(i) { return i.id === itemId; });
   if (!item) return;
   var stars = refineStars(item);
-  if (stars >= REFINE_MAX) { showRefineResult(false, item, true); return; }
+  if (stars >= REFINE_MAX_V2) { showRefineResult(false, item, true); return; }
+  var cost   = refineCost(stars);
+  var chance = refineSuccessChance(stars);
+  var hasBless = (G.blessStones || 0) > 0;
+  var r = RARITIES.find(function(x) { return x.id === item.rarity; }) || { color: '#888' };
+
+  var old = document.getElementById('refineChoiceModal');
+  if (old) old.remove();
+  var modal = document.createElement('div');
+  modal.id = 'refineChoiceModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9000;display:flex;align-items:center;justify-content:center;';
+  modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+  modal.innerHTML =
+    '<div style="background:#13132a;border:2px solid #2a2a5a;border-radius:12px;padding:20px;width:300px;max-width:90vw;text-align:center;">' +
+      '<div style="font-size:10px;color:#556;letter-spacing:1px;margin-bottom:6px;">ЗАТОЧКА</div>' +
+      '<div style="font-size:14px;color:' + r.color + ';font-weight:700;margin-bottom:4px;">' + item.name + '</div>' +
+      '<div style="font-size:20px;color:#a78bfa;margin-bottom:4px;">' + refineStarsStr(stars) + ' → +' + (stars + 1) + '</div>' +
+      '<div style="font-size:12px;color:#556;margin-bottom:16px;">Шанс: <span style="color:#2ecc71;font-weight:700;">' + chance + '%</span> &nbsp;·&nbsp; Цена: <span style="color:#f5c542;font-weight:700;">' + cost + ' 💰</span></div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<button onclick="doRefineItem(' + itemId + ',false)" style="flex:1;background:#1e1e40;border:2px solid #3a3a70;border-radius:8px;color:#ccd;padding:12px 8px;font-size:12px;cursor:pointer;font-family:inherit;">' +
+          '<div style="font-size:20px;margin-bottom:4px;">⚒</div>' +
+          '<div style="font-weight:700;margin-bottom:2px;">Обычная</div>' +
+          '<div style="color:#e74c3c;font-size:10px;">Провал = сломан</div>' +
+        '</button>' +
+        '<button onclick="doRefineItem(' + itemId + ',true)" ' +
+          (!hasBless
+            ? 'disabled style="flex:1;background:#161624;border:2px solid #2a2a40;border-radius:8px;color:#445;padding:12px 8px;font-size:12px;cursor:not-allowed;font-family:inherit;"'
+            : 'style="flex:1;background:#142014;border:2px solid #2ecc71;border-radius:8px;color:#cdc;padding:12px 8px;font-size:12px;cursor:pointer;font-family:inherit;"') + '>' +
+          '<div style="font-size:20px;margin-bottom:4px;">🛡</div>' +
+          '<div style="font-weight:700;margin-bottom:2px;">Безопасная</div>' +
+          '<div style="font-size:10px;color:' + (hasBless ? '#2ecc71' : '#e74c3c') + ';">' + (hasBless ? '✓ Камень ×' + G.blessStones : '✗ Нет камней') + '</div>' +
+        '</button>' +
+      '</div>' +
+      '<button onclick="document.getElementById("refineChoiceModal").remove()" style="margin-top:12px;background:transparent;border:1px solid #334;border-radius:6px;color:#445;padding:6px 24px;cursor:pointer;font-size:11px;font-family:inherit;">Отмена</button>' +
+    '</div>';
+  document.getElementById('app').appendChild(modal);
+}
+
+// ── Выполнить заточку ──
+function doRefineItem(itemId, useBless) {
+  var m = document.getElementById('refineChoiceModal');
+  if (m) m.remove();
+  var item = G.inventory.find(function(i) { return i.id === itemId; });
+  if (!item) return;
+  var stars = refineStars(item);
+  if (stars >= REFINE_MAX_V2) { showRefineResult(false, item, true); return; }
   var cost = refineCost(stars);
   if (G.gold < cost) { showRefineResult(null, item, false, cost); return; }
+  if (useBless && !(G.blessStones > 0)) {
+    showRefineResult(null, item, false, cost, 0, 'nostone'); return;
+  }
   G.gold -= cost;
+  if (useBless) G.blessStones = Math.max(0, (G.blessStones || 0) - 1);
   updateHUD();
   var success = Math.random() * 100 < refineSuccessChance(stars);
   if (success) {
     item.refine = stars + 1;
     var bonus = refineStatBonus(stars);
-    Object.keys(item.stats).forEach(function(s) { item.stats[s] = (item.stats[s] || 0) + bonus; });
+    // Бонус только к primary стату (не к crit/dodge/critDmg)
+    var typeInfo = [].concat(STAFF_TYPES, ITEM_TYPES).find(function(t) { return t.slot === item.slot && (t.forClass ? t.forClass === item.forClass : !item.forClass); });
+    var primaryStat = typeInfo ? typeInfo.primary : Object.keys(item.stats)[0];
+    if (item.stats[primaryStat] !== undefined) {
+      item.stats[primaryStat] = (item.stats[primaryStat] || 0) + bonus;
+    }
     if (item._equipped) recalcStats();
-    showRefineResult(true, item, false, cost, bonus);
+    showRefineResult(true, item, false, cost, bonus, useBless ? 'bless' : 'normal');
+  } else if (useBless) {
+    showRefineResult('safe', item, false, cost, 0, 'bless');
   } else {
-    // Провал — предмет уничтожается
+    // Обычная — предмет ломается, возврат руды x2^stars
+    var oreBack = Math.pow(2, stars);
+    var oreKey  = { common:'core', uncommon:'uore', rare:'rore', epic:'eore', legend:'lore' }[item.rarity] || 'core';
+    if (!G.ore) G.ore = {};
+    G.ore[oreKey] = (G.ore[oreKey] || 0) + oreBack;
     if (item._equipped) { G.equipped[item.slot] = null; recalcStats(); }
     var idx = G.inventory.findIndex(function(i) { return i.id === itemId; });
     G.inventory.splice(idx, 1);
-    showRefineResult(false, item, false, cost);
+    showRefineResult(false, item, false, cost, 0, 'normal', oreBack, oreKey);
   }
   updateHUD();
+  // Сохраняем инвентарь немедленно — важно чтобы заточка попала на сервер до возможной продажи
+  if (window.GameSync && typeof window.GameSync.saveInstant === 'function') {
+    var inv = G.inventory.map(function(it) { var c = Object.assign({}, it); delete c._equipped; return c; });
+    window.GameSync.saveInstant({ inventory: inv, gold: G.gold, ore: G.ore, blessStones: G.blessStones });
+  }
 }
 
 // ── Оверлей результата заточки ──
-function showRefineResult(success, item, maxed, cost, bonus) {
+function showRefineResult(success, item, maxed, cost, bonus, mode, oreBack, oreKey) {
   var overlay = document.getElementById('refineOverlay');
   var icon    = document.getElementById('refineIcon');
   var text    = document.getElementById('refineText');
@@ -260,23 +435,31 @@ function showRefineResult(success, item, maxed, cost, bonus) {
   document.getElementById('itemModal').classList.remove('show');
   if (maxed) {
     icon.textContent = '⛔'; text.textContent = 'МАКСИМУМ'; text.style.color = '#778';
-    sub.textContent  = 'Заточка ' + REFINE_MAX + ' — предел';
+    sub.textContent  = 'Заточка ' + REFINE_MAX_V2 + ' — предел';
+  } else if (mode === 'nostone') {
+    icon.textContent = '🛡'; text.textContent = 'НЕТ КАМНЕЙ'; text.style.color = '#2ecc71';
+    sub.textContent  = 'Скрафти камни безопасной заточки';
   } else if (success === null) {
     icon.textContent = '💰'; text.textContent = 'НЕТ ЗОЛОТА'; text.style.color = '#f5c542';
     sub.textContent  = 'Нужно ' + cost + ' 💰';
-  } else if (success) {
+  } else if (success === true) {
     icon.textContent = '✨'; text.textContent = '+' + item.refine + ' УСПЕХ!'; text.style.color = '#a78bfa';
-    sub.textContent  = 'Все статы +' + bonus + ' · Осталось ' + G.gold + ' 💰';
+    sub.textContent  = 'Все статы +' + bonus + (mode === 'bless' ? ' · Камней: ' + G.blessStones : '');
+  } else if (success === 'safe') {
+    icon.textContent = '🛡'; text.textContent = 'ПРОВАЛ (защита)'; text.style.color = '#2ecc71';
+    sub.textContent  = 'Предмет цел · Камней: ' + (G.blessStones || 0);
   } else {
     icon.textContent = '💥'; text.textContent = 'СЛОМАЛСЯ!'; text.style.color = '#e74c3c';
-    sub.textContent  = item.name + ' уничтожен · -' + cost + ' 💰';
+    var oreTxt = oreBack ? ' · +' + oreBack + ' руды' : '';
+    sub.textContent  = item.name + ' уничтожен · -' + cost + ' 💰' + oreTxt;
   }
   icon.style.animation = 'none'; icon.offsetHeight; icon.style.animation = '';
   overlay.classList.add('show');
   setTimeout(function() {
     overlay.classList.remove('show');
     if (activeTab === 'inv') renderInventory();
-  }, 2000);
+    if (activeTab === 'craft') renderCraft();
+  }, 2200);
 }
 
 // ═══════════════════════════════
@@ -483,16 +666,83 @@ function openItemModal(itemId) {
   }
 
   // ── Обычный предмет ──
-  var statLabels = { atk: 'ATK', def: 'DEF', hp: 'HP', spd: 'SPD', crit: 'CRIT %', dodge: 'DODGE %' };
+  var statLabels = { atk: 'ATK', def: 'DEF', hp: 'HP', spd: 'SPD', crit: 'CRIT %', dodge: 'DODGE %', critDmg: 'CRIT DMG' };
+
+  // Статы текущего предмета
   var statsHtml = '';
   Object.keys(item.stats).forEach(function(s) {
-    statsHtml += '<div class="modal-stat-row"><span style="color:#aaa">' + (statLabels[s] || s) + '</span><span>+' + item.stats[s] + '</span></div>';
+    if (!item.stats[s]) return;
+    var diff = '';
+    var eqItem = G.equipped[item.slot];
+    if (eqItem && eqItem.id !== item.id) {
+      var d = (item.stats[s] || 0) - (eqItem.stats[s] || 0);
+      diff = d > 0 ? ' <span style="color:#2ecc71;font-size:10px;">▲+' + d + '</span>'
+           : d < 0 ? ' <span style="color:#e74c3c;font-size:10px;">▼' + d + '</span>'
+           : ' <span style="color:#556;font-size:10px;">=</span>';
+    }
+    var displayVal = s === 'critDmg' ? ('×' + item.stats[s].toFixed(2)) : ('+' + item.stats[s]);
+    statsHtml += '<div class="modal-stat-row"><span style="color:#aaa">' + (statLabels[s] || s) + '</span><span>' + displayVal + diff + '</span></div>';
   });
   document.getElementById('mStats').innerHTML = statsHtml || '<div style="color:#445;font-size:11px;">Нет бонусов</div>';
 
+  // Блок руны
+  var runeInfoHtml = '';
+  if (item.rune) {
+    var rtt = RUNE_TYPES.find(function(r) { return r.id === item.rune.type; });
+    if (rtt) {
+      var rc = RARITIES.find(function(x) { return x.id === rtt.rarity; }) || { color: '#888' };
+      var runeStats = '';
+      if (item.rune.atk) runeStats += ' +' + item.rune.atk + ' ATK';
+      if (item.rune.def) runeStats += ' +' + item.rune.def + ' DEF';
+      if (item.rune.hp)  runeStats += ' +' + item.rune.hp + ' HP';
+      runeInfoHtml = '<div style="margin-top:6px;padding:7px 10px;background:rgba(255,255,255,0.04);border:1px solid ' + rc.color + '55;border-radius:8px;display:flex;align-items:center;gap:8px;">' +
+        '<img src="' + rtt.icon + '" style="width:20px;height:20px;image-rendering:pixelated;flex-shrink:0;" onerror="this.style.display=\'none\'">' +
+        '<div><div style="font-size:10px;color:' + rc.color + ';font-weight:700;">' + rtt.name + '</div>' +
+        '<div style="font-size:11px;color:#aaa;">' + runeStats.trim() + '</div></div>' +
+      '</div>';
+    }
+  }
+  document.getElementById('mStats').innerHTML = statsHtml + runeInfoHtml || '<div style="color:#445;font-size:11px;">Нет бонусов</div>';
+
+  // Окошко надетого предмета того же слота
+  var eqEl = document.getElementById('mEquipped');
+  var equippedItem = G.equipped[item.slot] || null;
+  if (eqEl) {
+    if (equippedItem && equippedItem.id !== item.id) {
+      var eqR     = RARITIES.find(function(x) { return x.id === equippedItem.rarity; }) || { color: '#888', name: '—' };
+      var eqStars = refineStars(equippedItem);
+      var eqStatRows = '';
+      Object.keys(equippedItem.stats).forEach(function(s) {
+        if (!equippedItem.stats[s]) return;
+        var d = (item.stats[s] || 0) - (equippedItem.stats[s] || 0);
+        // На надетом инвертируем: если новый лучше (d>0) — надетый хуже → ▼
+        var diffStr = d > 0 ? ' <span style="color:#e74c3c;font-size:10px;">▼-' + d + '</span>'
+                   : d < 0 ? ' <span style="color:#2ecc71;font-size:10px;">▲+' + (-d) + '</span>'
+                   : ' <span style="color:#556;font-size:10px;">=</span>';
+        eqStatRows += '<div class="modal-stat-row" style="font-size:11px;"><span style="color:#667">' + (statLabels[s] || s) + '</span><span style="color:#999;">+' + equippedItem.stats[s] + diffStr + '</span></div>';
+      });
+      eqEl.innerHTML =
+        '<div style="padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid #2a2a4a;border-radius:10px;margin-bottom:10px;">' +
+          '<div style="font-size:9px;color:#556;letter-spacing:1px;margin-bottom:6px;">НАДЕТ</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+            '<img src="' + equippedItem.icon + '" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated;flex-shrink:0;" onerror="this.style.opacity=0">' +
+            '<div style="flex:1;min-width:0;">' +
+              '<div style="font-size:12px;font-weight:bold;color:' + eqR.color + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+                equippedItem.name + (eqStars > 0 ? ' <span style="color:#a78bfa">+' + eqStars + '</span>' : '') +
+              '</div>' +
+              '<div style="font-size:9px;color:#556;margin-top:1px;">' + eqR.name + ' · Lv.' + equippedItem.level + '</div>' +
+            '</div>' +
+          '</div>' +
+          eqStatRows +
+        '</div>';
+    } else {
+      eqEl.innerHTML = '';
+    }
+  }
+
   // Блок заточки
   var refineHtml = '';
-  if (stars < REFINE_MAX) {
+  if (stars < REFINE_MAX_V2) {
     var cost    = refineCost(stars);
     var chance  = refineSuccessChance(stars);
     var nextBonus = refineStatBonus(stars);
@@ -522,7 +772,7 @@ function openItemModal(itemId) {
   if (canSell) {
     actHtml += '<button class="modal-btn" style="background:rgba(0,200,80,0.12);border-color:#00c850;color:#00c850;" onclick="openSellModal(' + itemId + ')">💰 Продать</button>';
   }
-  if (stars < REFINE_MAX) actHtml += '<button class="modal-btn refine" onclick="refineItem(' + itemId + ')">⚒ Точить</button>';
+  if (stars < REFINE_MAX_V2) actHtml += '<button class="modal-btn refine" onclick="openRefineModal(' + itemId + ')">⚒ Точить</button>';
   actHtml += '<button class="modal-btn destroy" onclick="destroyItem(' + itemId + ')">🗑</button>';
   document.getElementById('mActions').innerHTML = actHtml;
   document.getElementById('itemModal').classList.add('show');
@@ -567,7 +817,7 @@ function renderInventory() {
 
   // Суммарный бонус
   var bonusHtml = '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;">';
-  var statLabels = { atk: 'ATK', def: 'DEF', hp: 'HP', spd: 'SPD', crit: 'CRIT%', dodge: 'DODGE%' };
+  var statLabels = { atk: 'ATK', def: 'DEF', hp: 'HP', spd: 'SPD', crit: 'CRIT%', dodge: 'DODGE%', critDmg: 'CRIT DMG' };
   Object.keys(bonus).forEach(function(s) {
     if (!bonus[s]) return;
     bonusHtml += '<div style="font-size:10px;background:rgba(255,255,255,0.04);border:1px solid #2a2a5a;border-radius:4px;padding:2px 7px;color:#4cf;">+' +
@@ -590,11 +840,9 @@ function renderInventory() {
       '<button onclick="deleteSelected()" ' + (selCount > 0 ? '' : 'disabled') + ' style="flex:2;font-size:10px;font-family:Courier New,monospace;padding:5px 0;border-radius:6px;border:1.5px solid ' + (selCount > 0 ? '#e74c3c' : '#333') + ';background:' + (selCount > 0 ? 'rgba(231,76,60,0.15)' : 'rgba(255,255,255,0.02)') + ';color:' + (selCount > 0 ? '#e74c3c' : '#444') + ';cursor:' + (selCount > 0 ? 'pointer' : 'not-allowed') + ';">🗑 Удалить (' + selCount + ')</button></div>';
   }
 
-  var items = G.inventory.slice();
+  var items = G.inventory.filter(function(i) { return !i._equipped && !i.isOre; });
   if (G.invFilter !== 'all') items = items.filter(function(i) { return i.slot === G.invFilter; });
   items.sort(function(a, b) {
-    if (a._equipped && !b._equipped) return -1;
-    if (!a._equipped && b._equipped) return 1;
     var rd = rarityOrder(b.rarity) - rarityOrder(a.rarity);
     if (rd) return rd;
     return b.level - a.level;
@@ -613,7 +861,7 @@ function renderInventory() {
       var selModeClass = _invSelectMode ? ' sel-mode' : '';
       var selClass = isSel ? ' selected' : '';
       var clickHandler = _invSelectMode
-        ? (item._equipped ? '' : 'toggleInvSelect(' + item.id + ')')
+        ? 'toggleInvSelect(' + item.id + ')'
         : 'openItemModal(' + item.id + ')';
       var checkmark = _invSelectMode ? '<div class="sel-check">' + (isSel ? '✓' : '○') + '</div>' : '';
 
@@ -630,11 +878,18 @@ function renderInventory() {
           '<div style="font-size:7px;color:' + classCol + ';margin-top:2px;">' + (isWrong ? '🔒' : have + '/' + bkcost) + '</div>' +
           '<div class="inv-rarity-dot" style="background:#9b59b6"></div></div>';
       } else {
-        gridHtml += '<div class="inv-slot rarity-' + item.rarity + (item._equipped ? ' equipped' : '') + selModeClass + selClass + '" onclick="' + clickHandler + '">' +
+        var runeOverlay = '';
+        if (item.rune) {
+          var rt = RUNE_TYPES.find(function(r) { return r.id === item.rune.type; });
+          if (rt) runeOverlay = '<div style="position:absolute;bottom:2px;right:2px;width:12px;height:12px;z-index:2;">' +
+            '<img src="' + rt.icon + '" style="width:12px;height:12px;image-rendering:pixelated;" onerror="this.style.display=\'none\'">' +
+            '</div>';
+        }
+        gridHtml += '<div class="inv-slot rarity-' + item.rarity + selModeClass + selClass + '" onclick="' + clickHandler + '" style="position:relative;">' +
           checkmark +
-          (item._equipped ? '<div class="inv-eq-badge">E</div>' : '') +
+          runeOverlay +
           '<div class="inv-icon"><img src="' + item.icon + '" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated;" onerror="this.style.display=\'none\'"></div>' +
-          '<div class="inv-lvl">Lv.' + item.level + (item.refine ? ' <span style="color:#a78bfa">+' + item.refine + '</span>' : '') + '</div>' +
+          '<div class="inv-lvl">Lv.' + (item.level || '?') + (item.refine ? ' <span style="color:#a78bfa">+' + item.refine + '</span>' : '') + '</div>' +
           '<div class="inv-rarity-dot" style="background:' + r.dot + '"></div></div>';
       }
     });
@@ -642,5 +897,177 @@ function renderInventory() {
   }
 
   body.innerHTML = headerHtml + selBar + filterHtml + eqHtml + bonusHtml +
-    '<div style="font-size:9px;color:#556;letter-spacing:1px;margin-bottom:6px;">ПРЕДМЕТЫ (' + items.length + ')</div>' + gridHtml;
+    '<div style="font-size:9px;color:#556;letter-spacing:1px;margin-bottom:6px;">ПРЕДМЕТЫ (' + items.length + ')</div>' + gridHtml + _renderOreSection();
+}
+
+// ── Секция руды в инвентаре ──
+function _renderOreSection() {
+  if (!G.ore) return '';
+  var hasOre = ORE_TYPES.some(function(o) { return (G.ore[o.id] || 0) > 0; });
+  var html = '<div style="margin-top:14px;">' +
+    '<div style="font-size:9px;color:#556;letter-spacing:1px;margin-bottom:6px;">МАТЕРИАЛЫ</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">';
+  var anyShown = false;
+  ORE_TYPES.forEach(function(ore) {
+    var qty = G.ore[ore.id] || 0;
+    if (qty <= 0) return;
+    anyShown = true;
+    var r = RARITIES.find(function(x) { return x.id === ore.rarity; }) || { color: '#888' };
+    html += '<div onclick="openOreSellModal(\'' + ore.id + '\')" style="' +
+      'display:flex;align-items:center;gap:8px;' +
+      'background:rgba(255,255,255,0.03);border:1px solid ' + r.color + '44;' +
+      'border-radius:8px;padding:7px 10px;cursor:pointer;' +
+      'transition:background .15s;" ' +
+      'onmousedown="this.style.background=\'rgba(255,255,255,0.07)\'" ' +
+      'onmouseup="this.style.background=\'rgba(255,255,255,0.03)\'">' +
+      '<img src="' + ore.icon + '" style="width:28px;height:28px;image-rendering:pixelated;flex-shrink:0;" onerror="this.style.opacity=0.3">' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-size:11px;color:' + r.color + ';font-weight:700;">' + ore.name + '</div>' +
+        '<div style="font-size:12px;color:#ccd;">×' + qty + '</div>' +
+      '</div>' +
+      '<div style="font-size:9px;color:#445;">продать</div>' +
+    '</div>';
+  });
+  if (!anyShown) {
+    html += '<div style="grid-column:1/-1;text-align:center;color:#334;font-size:11px;padding:16px 0;">Руды нет — фармь этажи!</div>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+// ═══════════════════════════════
+//  ПРОДАЖА РУДЫ
+// ═══════════════════════════════
+function openOreSellModal(oreId) {
+  if (!G.marketUnlocked) {
+    showDmgPop('Маркет закрыт!', W * 0.4, GROUND * 0.5, '#e74c3c');
+    return;
+  }
+  var ore = ORE_TYPES.find(function(o) { return o.id === oreId; });
+  if (!ore) return;
+  var maxQty = G.ore[oreId] || 0;
+  if (maxQty <= 0) return;
+  var r = RARITIES.find(function(x) { return x.id === ore.rarity; }) || { color: '#888', name: '—' };
+
+  var old = document.getElementById('oreSellModal');
+  if (old) old.remove();
+
+  var modal = document.createElement('div');
+  modal.id = 'oreSellModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9100;display:flex;align-items:center;justify-content:center;';
+  modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+
+  modal.innerHTML =
+    '<div style="background:#13132a;border:2px solid ' + r.color + '66;border-radius:12px;padding:20px;width:300px;max-width:92vw;">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
+        '<img src="' + ore.icon + '" style="width:36px;height:36px;image-rendering:pixelated;" onerror="this.style.opacity=0.3">' +
+        '<div>' +
+          '<div style="font-size:13px;font-weight:700;color:' + r.color + ';">' + ore.name + '</div>' +
+          '<div style="font-size:10px;color:#556;">В наличии: <span style="color:#ccd;">×' + maxQty + '</span></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div style="margin-bottom:10px;">' +
+        '<label style="font-size:10px;color:#556;display:block;margin-bottom:4px;">КОЛИЧЕСТВО (макс ' + maxQty + ')</label>' +
+        '<div style="display:flex;gap:6px;align-items:center;">' +
+          '<button onclick="_oreQtyAdj(-10)" style="width:32px;height:32px;border-radius:6px;border:1px solid #2a2a5a;background:rgba(255,255,255,0.04);color:#aaa;cursor:pointer;font-size:14px;">−</button>' +
+          '<input id="oreSellQty" type="number" min="1" max="' + maxQty + '" value="1" ' +
+            'style="flex:1;background:#0d0d22;border:1.5px solid #2a2a5a;border-radius:6px;color:#ccd;font-size:15px;text-align:center;padding:6px;font-family:inherit;" ' +
+            'oninput="_oreUpdateNote()">' +
+          '<button onclick="_oreQtyAdj(10)" style="width:32px;height:32px;border-radius:6px;border:1px solid #2a2a5a;background:rgba(255,255,255,0.04);color:#aaa;cursor:pointer;font-size:14px;">+</button>' +
+        '</div>' +
+        '<div style="display:flex;gap:4px;margin-top:6px;">' +
+          '<button onclick="_oreQtySet(1)" style="flex:1;font-size:10px;font-family:inherit;padding:4px;border-radius:4px;border:1px solid #2a2a5a;background:rgba(255,255,255,0.03);color:#778;cursor:pointer;">1</button>' +
+          '<button onclick="_oreQtySet(10)" style="flex:1;font-size:10px;font-family:inherit;padding:4px;border-radius:4px;border:1px solid #2a2a5a;background:rgba(255,255,255,0.03);color:#778;cursor:pointer;">10</button>' +
+          '<button onclick="_oreQtySet(50)" style="flex:1;font-size:10px;font-family:inherit;padding:4px;border-radius:4px;border:1px solid #2a2a5a;background:rgba(255,255,255,0.03);color:#778;cursor:pointer;">50</button>' +
+          '<button onclick="_oreQtySet(' + maxQty + ')" style="flex:1;font-size:10px;font-family:inherit;padding:4px;border-radius:4px;border:1px solid #f5c542;background:rgba(245,197,66,0.08);color:#f5c542;cursor:pointer;">MAX</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div style="margin-bottom:14px;">' +
+        '<label style="font-size:10px;color:#556;display:block;margin-bottom:4px;">ЦЕНА ЗА ВЕСЬ ЛОТ (PIXR)</label>' +
+        '<input id="oreSellPrice" type="number" min="1" placeholder="Общая цена лота" ' +
+          'style="width:100%;box-sizing:border-box;background:#0d0d22;border:1.5px solid #2a2a5a;border-radius:6px;color:#ccd;font-size:15px;text-align:center;padding:8px;font-family:inherit;" ' +
+          'oninput="_oreUpdateNote()">' +
+      '</div>' +
+
+      '<div id="oreSellNote" style="font-size:11px;color:#556;text-align:center;margin-bottom:14px;">Итого: —</div>' +
+
+      '<div style="display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'oreSellModal\').remove()" ' +
+          'style="flex:1;padding:10px;border-radius:8px;font-family:inherit;font-size:12px;border:1px solid #334;background:transparent;color:#556;cursor:pointer;">Отмена</button>' +
+        '<button onclick="confirmOreSell(\'' + oreId + '\')" ' +
+          'style="flex:2;padding:10px;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;border:1.5px solid #00c850;background:rgba(0,200,80,0.12);color:#00c850;cursor:pointer;">💰 Выставить</button>' +
+      '</div>' +
+    '</div>';
+
+  document.getElementById('app').appendChild(modal);
+}
+
+function _oreQtyAdj(delta) {
+  var input = document.getElementById('oreSellQty');
+  if (!input) return;
+  var max = parseInt(input.max) || 1;
+  input.value = Math.max(1, Math.min(max, (parseInt(input.value) || 1) + delta));
+  _oreUpdateNote();
+}
+
+function _oreQtySet(v) {
+  var input = document.getElementById('oreSellQty');
+  if (!input) return;
+  var max = parseInt(input.max) || 1;
+  input.value = Math.min(v, max);
+  _oreUpdateNote();
+}
+
+function _oreUpdateNote() {
+  var qty   = parseInt(document.getElementById('oreSellQty').value) || 0;
+  var total = parseInt(document.getElementById('oreSellPrice').value) || 0;
+  var note  = document.getElementById('oreSellNote');
+  if (!note) return;
+  if (qty > 0 && total > 0) {
+    var perUnit = (total / qty).toFixed(1);
+    var earn    = Math.floor(total * 0.9);
+    note.innerHTML = 'За штуку: <strong style="color:#aaa;">' + perUnit + ' PIXR</strong>' +
+      ' · Вы получите: <strong style="color:#2ecc71;">' + earn + ' PIXR</strong> (−10% комиссия)';
+  } else {
+    note.textContent = 'Итого: —';
+  }
+}
+
+function confirmOreSell(oreId) {
+  var qty        = parseInt(document.getElementById('oreSellQty').value);
+  var totalPrice = parseInt(document.getElementById('oreSellPrice').value);
+  var max        = G.ore[oreId] || 0;
+
+  if (!qty || qty < 1)             { _taskToast('❌ Укажи количество'); return; }
+  if (!totalPrice || totalPrice < 1) { _taskToast('❌ Укажи цену'); return; }
+  if (qty > max)                   { _taskToast('❌ Недостаточно руды'); return; }
+
+  var API  = window.GameSync._API;
+  var init = window.GameSync._INIT;
+
+  fetch(API + '/api/market/sell-ore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData: init, oreId: oreId, qty: qty, price: totalPrice })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.ok) {
+      G.ore[oreId] = Math.max(0, (G.ore[oreId] || 0) - qty);
+      document.getElementById('oreSellModal').remove();
+      renderInventory();
+      _taskToast('✅ Руда выставлена на маркет!');
+      // ore уже атомарно списана на сервере — saveInstant не нужен
+    } else {
+      var msgs = {
+        max_lots:    '❌ Максимум 3 активных лота',
+        not_enough:  '❌ Недостаточно руды',
+        market_locked: '❌ Маркет не открыт',
+      };
+      _taskToast(msgs[d.error] || '❌ Ошибка: ' + d.error);
+    }
+  })
+  .catch(function() { _taskToast('❌ Ошибка сети'); });
 }

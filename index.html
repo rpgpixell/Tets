@@ -147,6 +147,26 @@
   <!-- ══════════════════════════════════
      TOP HUD — HP, XP, золото, этаж, CP
      ══════════════════════════════════ -->
+  <!-- Оверлей потери связи — блокирует игру -->
+  <div id="connOverlay" class="conn-overlay hidden">
+    <div class="conn-overlay-box">
+      <svg width="48" height="48" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated;display:block;margin:0 auto 16px">
+        <rect x="0" y="13" width="16" height="2" fill="#e74c3c"/>
+        <rect x="2" y="10" width="12" height="2" fill="#e74c3c" opacity="0.5"/>
+        <rect x="4" y="7"  width="8"  height="2" fill="#e74c3c" opacity="0.25"/>
+        <rect x="7" y="4"  width="2"  height="2" fill="#e74c3c" opacity="0.1"/>
+        <!-- крест -->
+        <rect x="6" y="0" width="4" height="2" fill="#e74c3c"/>
+        <rect x="6" y="4" width="4" height="2" fill="#e74c3c"/>
+        <rect x="4" y="2" width="2" height="2" fill="#e74c3c"/>
+        <rect x="10" y="2" width="2" height="2" fill="#e74c3c"/>
+      </svg>
+      <div class="conn-overlay-title">НЕТ СОЕДИНЕНИЯ</div>
+      <div class="conn-overlay-sub">Проверяем подключение...</div>
+      <div class="conn-overlay-dots"><span></span><span></span><span></span></div>
+    </div>
+  </div>
+
   <div id="hud">
     <div class="hud-avatar" id="hudAvatar">
       <img id="hudAvatarImg" src="" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;" onerror="this.style.display='none';this.parentElement.textContent='👤';this.parentElement.style.display='flex';this.parentElement.style.alignItems='center';this.parentElement.style.justifyContent='center';this.parentElement.style.fontSize='20px';">
@@ -292,6 +312,49 @@
     <span class="boss-hud-label">BOSS</span>
   </div>
 
+  <div id="pvpHudBtn" class="pvp-hud-btn" onclick="switchTab('pvp')" style="display:flex">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated">
+      <rect x="7" y="0" width="2" height="5" fill="currentColor"/>
+      <rect x="5" y="2" width="6" height="2" fill="currentColor"/>
+      <rect x="0" y="6" width="5" height="2" fill="currentColor"/>
+      <rect x="2" y="4" width="2" height="6" fill="currentColor"/>
+      <rect x="11" y="6" width="5" height="2" fill="currentColor"/>
+      <rect x="12" y="4" width="2" height="6" fill="currentColor"/>
+      <rect x="4" y="10" width="8" height="5" fill="currentColor"/>
+      <rect x="6" y="8" width="4" height="4" fill="currentColor"/>
+    </svg>
+    <span class="pvp-hud-label">АРЕНА</span>
+  </div>
+
+  <div id="craftHudBtn" class="craft-hud-btn" onclick="switchTab('craft')" style="display:none">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated">
+      <rect x="7" y="0" width="2" height="3" fill="#c8a000"/>
+      <rect x="5" y="1" width="6" height="2" fill="#c8a000"/>
+      <rect x="3" y="3" width="10" height="2" fill="#c8a000"/>
+      <rect x="2" y="5" width="12" height="6" fill="#c8a000"/>
+      <rect x="3" y="11" width="10" height="2" fill="#a07800"/>
+      <rect x="4" y="13" width="8" height="2" fill="#a07800"/>
+      <rect x="4" y="6" width="2" height="4" fill="#0d0d22"/>
+      <rect x="10" y="6" width="2" height="4" fill="#0d0d22"/>
+      <rect x="7" y="7" width="2" height="2" fill="#0d0d22"/>
+    </svg>
+    <span class="craft-hud-label">КРАФТ</span>
+  </div>
+
+  <div id="runeHudBtn" class="rune-hud-btn" onclick="switchTab('rune')" style="display:none">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated">
+      <rect x="7" y="0" width="2" height="2" fill="#a78bfa"/>
+      <rect x="5" y="2" width="6" height="2" fill="#a78bfa"/>
+      <rect x="3" y="4" width="10" height="2" fill="#a78bfa"/>
+      <rect x="2" y="6" width="12" height="4" fill="#c39bd3"/>
+      <rect x="3" y="10" width="10" height="2" fill="#a78bfa"/>
+      <rect x="5" y="12" width="6" height="2" fill="#7c5cbf"/>
+      <rect x="7" y="14" width="2" height="2" fill="#7c5cbf"/>
+      <rect x="6" y="7" width="4" height="2" fill="#0d0d22"/>
+    </svg>
+    <span class="rune-hud-label">РУНЫ</span>
+  </div>
+
   <div id="premModal" class="prem-modal hidden">
     <div class="prem-modal-box">
       <div class="prem-modal-header">
@@ -398,9 +461,6 @@
     <button class="nav-btn" id="navFriends" onclick="switchTab('friends')">
       <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated"><rect x="1" y="1" width="5" height="5" fill="currentColor"/><rect x="0" y="3" width="1" height="3" fill="currentColor"/><rect x="6" y="3" width="1" height="3" fill="currentColor"/><rect x="1" y="6" width="5" height="4" fill="currentColor"/><rect x="9" y="2" width="5" height="5" fill="currentColor"/><rect x="8" y="4" width="1" height="3" fill="currentColor"/><rect x="14" y="4" width="1" height="3" fill="currentColor"/><rect x="9" y="7" width="5" height="4" fill="currentColor"/><rect x="2" y="10" width="3" height="5" fill="currentColor"/><rect x="10" y="11" width="3" height="4" fill="currentColor"/></svg></span>ДРУЗЬЯ
     </button>
-    <button class="nav-btn" id="navPvp" onclick="switchTab('pvp')">
-      <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated"><rect x="7" y="0" width="2" height="5" fill="currentColor"/><rect x="5" y="2" width="6" height="2" fill="currentColor"/><rect x="0" y="6" width="5" height="2" fill="currentColor"/><rect x="2" y="4" width="2" height="6" fill="currentColor"/><rect x="11" y="6" width="5" height="2" fill="currentColor"/><rect x="12" y="4" width="2" height="6" fill="currentColor"/><rect x="4" y="10" width="8" height="5" fill="currentColor"/><rect x="6" y="8" width="4" height="4" fill="currentColor"/></svg></span>АРЕНА
-    </button>
     <button class="nav-btn" id="navWallet" onclick="switchTab('wallet')">
       <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated"><rect x="2" y="5" width="12" height="10" fill="currentColor"/><rect x="2" y="3" width="8" height="4" fill="currentColor"/><rect x="3" y="2" width="6" height="2" fill="currentColor"/><rect x="10" y="4" width="4" height="4" fill="currentColor"/><rect x="11" y="5" width="2" height="2" fill="var(--dark)"/><rect x="4" y="8" width="4" height="4" fill="var(--dark)"/><rect x="5" y="9" width="2" height="2" fill="currentColor" opacity="0.6"/><rect x="9" y="8" width="3" height="3" fill="var(--dark)"/></svg></span>КОШЕЛЁК
     </button>
@@ -418,6 +478,7 @@
           <div class="modal-sub"  id="mSub"></div>
         </div>
       </div>
+      <div id="mEquipped"></div>
       <div class="modal-stats"   id="mStats"></div>
       <div class="modal-actions" id="mActions"></div>
     </div>
@@ -683,6 +744,43 @@
     </div>
   </div>
 
+  <!-- Крафт -->
+  <div class="panel" id="panelCraft">
+    <div class="panel-header">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated;vertical-align:middle;margin-right:6px">
+        <rect x="7" y="0" width="2" height="3" fill="currentColor"/>
+        <rect x="5" y="1" width="6" height="2" fill="currentColor"/>
+        <rect x="3" y="3" width="10" height="2" fill="currentColor"/>
+        <rect x="2" y="5" width="12" height="6" fill="currentColor"/>
+        <rect x="3" y="11" width="10" height="2" fill="currentColor"/>
+        <rect x="4" y="13" width="8" height="2" fill="currentColor"/>
+        <rect x="4" y="6" width="2" height="4" fill="#0d0d22"/>
+        <rect x="10" y="6" width="2" height="4" fill="#0d0d22"/>
+        <rect x="7" y="7" width="2" height="2" fill="#0d0d22"/>
+      </svg>
+      КРАФТ
+    </div>
+    <div class="panel-body" id="craftBody"></div>
+  </div>
+
+  <!-- Руны -->
+  <div class="panel" id="panelRune">
+    <div class="panel-header" style="color:#a78bfa;border-bottom-color:#3a2a6a;">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="image-rendering:pixelated;vertical-align:middle;margin-right:6px">
+        <rect x="7" y="0" width="2" height="2" fill="#a78bfa"/>
+        <rect x="5" y="2" width="6" height="2" fill="#a78bfa"/>
+        <rect x="3" y="4" width="10" height="2" fill="#a78bfa"/>
+        <rect x="2" y="6" width="12" height="4" fill="#c39bd3"/>
+        <rect x="3" y="10" width="10" height="2" fill="#a78bfa"/>
+        <rect x="5" y="12" width="6" height="2" fill="#7c5cbf"/>
+        <rect x="7" y="14" width="2" height="2" fill="#7c5cbf"/>
+        <rect x="6" y="7" width="4" height="2" fill="#0d0d22"/>
+      </svg>
+      РУНЫ
+    </div>
+    <div class="panel-body" id="runeBody"></div>
+  </div>
+
 </div><!-- #app -->
 
 <!-- ══════════════════════════════════
@@ -712,6 +810,7 @@
       <div class="market-tabs">
         <button class="market-tab active" id="marketTabAll" onclick="switchMarketTab('all')">Все лоты</button>
         <button class="market-tab" id="marketTabMy" onclick="switchMarketTab('my')">Мои лоты</button>
+        <button class="market-tab" id="marketTabHistory" onclick="switchMarketTab('history')">📋 История</button>
       </div>
       <div class="market-filters" id="marketFilters">
         <button class="market-filter-btn active" onclick="setMarketFilter('all')">Все</button>
@@ -734,7 +833,7 @@
       <div class="market-unlock-title">ОТКРЫТЬ МАРКЕТ</div>
       <div class="market-unlock-desc">Маркет — место где игроки продают предметы из своих инвентарей.<br><br>Разовый взнос открывает доступ навсегда.</div>
       <div class="market-unlock-cost">1 000 💎 PIXR</div>
-      <button class="market-unlock-btn" onclick="confirmUnlockMarket()">Открыть за 1000 PIXR</button>
+      <button class="market-unlock-btn" onclick="confirmUnlockMarket()">Открыть за 1 PIXR</button>
       <button class="market-unlock-close" onclick="document.getElementById('marketUnlockModal').classList.add('hidden')">Отмена</button>
     </div>
   </div>

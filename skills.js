@@ -171,5 +171,5 @@ function effectiveCrit() {
 }
 
 function effectiveCritDmg() {
-  return 1.8 + (G.baseStats.critDmg || 0);
+  return 1.8 + (G.stats.critDmg || 0);
 }

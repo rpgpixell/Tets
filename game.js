@@ -461,6 +461,7 @@ monsters = monsters.filter(m => {
       G.gold += finalGold;
       G.killCount++;
       tryDropItem(G.floor);
+      tryDropOre(G.floor);
       
       // PIXR шанс зависит от этажа
       var pixrChance = 0.02 * Math.pow(1.5, G.floor - 1) * premMult('pixr');
@@ -735,6 +736,7 @@ function flashRed() {
 var _loopRunning = false;
 
 function loop(ts) {
+  if (!gameActive) { _loopRunning = false; return; } // стоп при офлайне
   const dt = Math.min((ts - lastTime) / 1000, 0.1);
   lastTime = ts;
   update(dt);

@@ -33,8 +33,25 @@ function setUpgTab(t) { _upgTab = t; renderUpgrades(); }
 function upgCost(u) {
   const lv = G.upg[u.id] || 0;
   if (u.currency === 'pixr') return { gold: 0, pixr: u.baseCost };
-  const goldCost = Math.floor(u.baseCost * Math.pow(1.6, lv));
-  const pixrCost = lv >= 15 ? (lv - 14) : 0;
+  
+  // ✅ Золото: фиксируется после 20 уровня
+  const effectiveLv = Math.min(lv, 20);
+  const goldCost = Math.floor(u.baseCost * Math.pow(1.6, effectiveLv));
+  
+  // ✅ Прогрессивная шкала PIXR (с 20 уровня)
+  let pixrCost = 0;
+  if (lv >= 20 && lv < 30) {
+    pixrCost = 15;      // 20-29 уровень
+  } else if (lv >= 30 && lv < 40) {
+    pixrCost = 30;      // 30-39 уровень
+  } else if (lv >= 40 && lv < 50) {
+    pixrCost = 60;      // 40-49 уровень
+  } else if (lv >= 50 && lv < 60) {
+    pixrCost = 100;     // 50-59 уровень
+  } else if (lv >= 60) {
+    pixrCost = 100;     // 60+ (если maxLv больше)
+  }
+  
   return { gold: goldCost, pixr: pixrCost };
 }
 
@@ -188,6 +205,7 @@ function openFloorLoot(floorN) {
   var rarityNames  = { common:'Обычный', uncommon:'Необычный', rare:'Редкий', epic:'Эпический', legend:'Легендарный' };
   var classColors  = { fire:'#ff7030', light:'#ffd040', water:'#40d0ff' };
   var classLabels  = { fire:'Пирокан', light:'Люмос', water:'Аквас' };
+  // Реальные границы редкости (совпадают с FLOOR_MIN/MAX_RARITY в inventory.js)
   var maxRarityMap = { 1:'common', 2:'uncommon', 3:'uncommon', 4:'rare', 5:'rare', 6:'rare', 7:'epic', 8:'epic', 9:'legend', 10:'legend' };
   var minRarityMap = { 1:'common', 2:'common', 3:'common', 4:'common', 5:'common', 6:'common', 7:'common', 8:'uncommon', 9:'uncommon', 10:'uncommon' };
   var minR = minRarityMap[f.n] || 'common';
@@ -205,42 +223,89 @@ function openFloorLoot(floorN) {
     '<span style="color:' + minCol + ';">' + rarityNames[minR] + '</span>' +
     ' — <span style="color:' + maxCol + ';">' + rarityNames[maxR] + '</span></div></div></div>';
 
-  if (f.loot && f.loot.length) {
-    var totalWeight = f.loot.reduce(function(s, i) { return s + i.chance; }, 0);
-    f.loot.forEach(function(item) {
-      var col    = rarityColors[item.rarity] || '#888';
-      var rname  = rarityNames[item.rarity]  || item.rarity;
-      var iconSrc = itemIcon(item.slot, item.rarity, item.forClass || null);
-      var realChance = ((item.chance / totalWeight) * parseFloat(realItemChance)).toFixed(2);
-      html += '<div class="loot-row"><img src="' + iconSrc + '" style="width:24px;height:24px;object-fit:contain;image-rendering:pixelated;margin-right:8px;vertical-align:middle;" onerror="this.style.opacity=0">';
-      html += '<span style="flex:1;color:#ddd;">' + item.name;
-      if (item.forClass) html += ' <span style="font-size:9px;color:' + (classColors[item.forClass]||'#aaa') + ';border:1px solid ' + (classColors[item.forClass]||'#aaa') + ';padding:1px 4px;border-radius:3px;">' + (classLabels[item.forClass]||item.forClass) + '</span>';
-      html += '</span><span class="loot-rarity-badge" style="color:' + col + ';border-color:' + col + ';margin-right:8px;">' + rname + '</span>';
-      html += '<span style="color:#f5c542;font-weight:bold;min-width:38px;text-align:right;">' + realChance + '%</span></div>';
-    });
-  } else {
-    html += '<div style="color:#445;font-size:11px;text-align:center;padding:20px 0;">Нет данных о дропе</div>';
-  }
+  // Пояснение: реальный дроп — случайный предмет из пула
+  html += '<div style="font-size:9px;color:#556;padding:6px 8px;margin-bottom:8px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid #2a2a5a;">' +
+    '⚙ Тип предмета выбирается случайно из общего пула. Редкость определяется этажом.</div>';
+
+  // Раздел: обычные предметы (75% от дропа)
+  var itemChanceEach = (parseFloat(realItemChance) * 0.75 / 7).toFixed(3);
+  html += '<div style="font-size:10px;color:#aaa;margin-bottom:4px;border-bottom:1px solid #2a2a5a;padding-bottom:4px;">⚔ Снаряжение <span style="color:#556;font-size:9px;">(75% от дропа, каждый тип равновероятен)</span></div>';
+  var allItemTypes = [
+    { slot:'body',   name:'Нагрудник' },
+    { slot:'legs',   name:'Штаны'     },
+    { slot:'gloves', name:'Перчатки'  },
+    { slot:'boots',  name:'Боты'      },
+    { slot:'helmet', name:'Шлем'      },
+    { slot:'ring',   name:'Кольцо'    },
+    { slot:'belt',   name:'Пояс'      },
+  ];
+  allItemTypes.forEach(function(it) {
+    var iconSrc = itemIcon(it.slot, maxR, null);
+    html += '<div class="loot-row"><img src="' + iconSrc + '" style="width:24px;height:24px;object-fit:contain;image-rendering:pixelated;margin-right:8px;vertical-align:middle;" onerror="this.style.opacity=0">';
+    html += '<span style="flex:1;color:#ddd;">' + it.name + '</span>';
+    html += '<span class="loot-rarity-badge" style="color:' + minCol + ';border-color:' + minCol + ';margin-right:8px;">' + rarityNames[minR] +
+      (minR !== maxR ? '<span style="color:#556;">–</span><span style="color:' + maxCol + ';">' + rarityNames[maxR] + '</span>' : '') + '</span>';
+    html += '<span style="color:#f5c542;font-weight:bold;min-width:48px;text-align:right;">~' + itemChanceEach + '%</span></div>';
+  });
+
+  // Раздел: посохи (25% от дропа)
+  var staffChanceEach = (parseFloat(realItemChance) * 0.25 / 3).toFixed(3);
+  html += '<div style="font-size:10px;color:#aaa;margin:8px 0 4px;border-bottom:1px solid #2a2a5a;padding-bottom:4px;">🔮 Посохи <span style="color:#556;font-size:9px;">(25% от дропа, для своего класса)</span></div>';
+  var staffTypes = [
+    { forClass:'fire',  label:'Пирокан', color:'#ff7030' },
+    { forClass:'light', label:'Люмос',   color:'#ffd040' },
+    { forClass:'water', label:'Аквас',   color:'#40d0ff' },
+  ];
+  staffTypes.forEach(function(st) {
+    var iconSrc = itemIcon('weapon', maxR, st.forClass);
+    html += '<div class="loot-row"><img src="' + iconSrc + '" style="width:24px;height:24px;object-fit:contain;image-rendering:pixelated;margin-right:8px;vertical-align:middle;" onerror="this.style.opacity=0">';
+    html += '<span style="flex:1;color:#ddd;">Посох <span style="font-size:9px;color:' + st.color + ';border:1px solid ' + st.color + ';padding:1px 4px;border-radius:3px;">' + st.label + '</span></span>';
+    html += '<span class="loot-rarity-badge" style="color:' + minCol + ';border-color:' + minCol + ';margin-right:8px;">' + rarityNames[minR] +
+      (minR !== maxR ? '<span style="color:#556;">–</span><span style="color:' + maxCol + ';">' + rarityNames[maxR] + '</span>' : '') + '</span>';
+    html += '<span style="color:#f5c542;font-weight:bold;min-width:48px;text-align:right;">~' + staffChanceEach + '%</span></div>';
+  });
 
   // PIXR
+  html += '<div style="font-size:10px;color:#aaa;margin:8px 0 4px;border-bottom:1px solid #2a2a5a;padding-bottom:4px;">💰 Валюта</div>';
   html += '<div class="loot-row"><img src="images/pixr.png" style="width:24px;height:24px;object-fit:contain;image-rendering:pixelated;margin-right:8px;vertical-align:middle;" onerror="this.style.opacity=0">';
   html += '<span style="flex:1;color:#ff44cc;">PIXR монетка</span>';
   html += '<span class="loot-rarity-badge" style="color:#ff44cc;border-color:#ff44cc;margin-right:8px;">Валюта</span>';
-  html += '<span style="color:#f5c542;font-weight:bold;min-width:38px;text-align:right;">' + pixrChance + '%</span></div>';
+  html += '<span style="color:#f5c542;font-weight:bold;min-width:48px;text-align:right;">' + pixrChance + '%</span></div>';
 
-  // Книги по классам
+  // Книги навыков
+  html += '<div style="font-size:10px;color:#aaa;margin:8px 0 4px;border-bottom:1px solid #2a2a5a;padding-bottom:4px;">📖 Книги навыков <span style="color:#556;font-size:9px;">(случайный навык класса)</span></div>';
   var bookClasses = [
     { id:'fire',  label:'Пирокан', color:'#ff7030', skills:'Огн. шар, Проклятие, Ярость' },
     { id:'light', label:'Люмос',   color:'#ffd040', skills:'Кара света, Щит света, Отражение' },
     { id:'water', label:'Аквас',   color:'#40d0ff', skills:'Тройной удар, Концентрация, Заморозка' },
   ];
+  var bookChanceEach = (parseFloat(realBookChance) / 3).toFixed(4);
   bookClasses.forEach(function(bc) {
     html += '<div class="loot-row"><span style="font-size:20px;margin-right:8px;">📖</span>';
-    html += '<span style="flex:1;color:#b88cf8;">Книга навыка <span style="font-size:9px;color:' + bc.color + ';border:1px solid ' + bc.color + ';padding:1px 4px;border-radius:3px;">' + bc.label + '</span>';
+    html += '<span style="flex:1;color:#b88cf8;">Книга <span style="font-size:9px;color:' + bc.color + ';border:1px solid ' + bc.color + ';padding:1px 4px;border-radius:3px;">' + bc.label + '</span>';
     html += ' <span style="font-size:9px;color:#556;">(' + bc.skills + ')</span></span>';
     html += '<span class="loot-rarity-badge" style="color:#9b59b6;border-color:#9b59b6;margin-right:8px;">Эпический</span>';
-    html += '<span style="color:#f5c542;font-weight:bold;min-width:38px;text-align:right;">' + realBookChance + '%</span></div>';
+    html += '<span style="color:#f5c542;font-weight:bold;min-width:48px;text-align:right;">~' + bookChanceEach + '%</span></div>';
   });
+
+  // Руда
+  var oreTable = ORE_DROP_TABLE[f.n] || ORE_DROP_TABLE[10];
+  var oreRows = '';
+  ORE_TYPES.forEach(function(ore) {
+    var chance = oreTable[ore.id] || 0;
+    if (chance <= 0) return;
+    var r2 = RARITIES.find(function(x) { return x.id === ore.rarity; }) || { color: '#888', name: '—' };
+    oreRows += '<div class="loot-row">' +
+      '<img src="' + ore.icon + '" style="width:24px;height:24px;object-fit:contain;image-rendering:pixelated;margin-right:8px;vertical-align:middle;" onerror="this.style.opacity=0.3">' +
+      '<span style="flex:1;color:' + r2.color + ';">' + ore.name + ' <span style="font-size:9px;color:#556;">1–3 шт.</span></span>' +
+      '<span class="loot-rarity-badge" style="color:' + r2.color + ';border-color:' + r2.color + ';margin-right:8px;">' + r2.name + '</span>' +
+      '<span style="color:#f5c542;font-weight:bold;min-width:48px;text-align:right;">' + chance + '%</span>' +
+    '</div>';
+  });
+  if (oreRows) {
+    html += '<div style="font-size:10px;color:#aaa;margin:8px 0 4px;border-bottom:1px solid #2a2a5a;padding-bottom:4px;">⛏ Руда <span style="color:#556;font-size:9px;">(отдельный бросок от шмота)</span></div>';
+    html += oreRows;
+  }
 
   html += '<div style="margin-top:10px;font-size:9px;color:#445;text-align:center;">% — шанс выпадения за каждое убийство</div>';
   html += '<button onclick="closeFloorLootModal()" style="width:100%;margin-top:12px;padding:10px;font-size:12px;font-family:Courier New,monospace;border-radius:8px;border:1.5px solid #2a2a5a;background:rgba(255,255,255,0.04);color:#778;cursor:pointer;">Закрыть</button>';
@@ -480,6 +545,7 @@ function atkSpdSvg()   { return `<svg width="20" height="20" viewBox="0 0 10 10"
 // ═══════════════════════════════
 
 var _walletTab = 'wallet'; // 'wallet' | 'stats'
+var _exchangeStats = null; // кэш статистики обмена
 
 function renderWallet() {
   const cp = calcCP();
@@ -509,8 +575,6 @@ function renderWallet() {
   }
   
   // ── КОШЕЛЕК ──
-  const canExchange = pixr >= 1000;
-  
   const html = `
     ${tabsHtml}
     
@@ -528,17 +592,48 @@ function renderWallet() {
       </div>
     </div>
     
+    <!-- Индикатор обмена PIXR→GRAM -->
+    <div id="exchangeIndicator" style="padding:10px 12px;background:rgba(255,255,255,0.02);border:1px solid #2a2a5a;border-radius:10px;margin-bottom:10px;">
+      <div style="font-size:10px;color:#778;letter-spacing:1px;margin-bottom:6px;">📊 ИНДИКАТОР ОБМЕНА PIXR → GRAM</div>
+      <div id="exchangeIndicatorInner" style="color:#445;font-size:11px;">Загрузка...</div>
+    </div>
+    
     <!-- Обмен PIXR → GRAM -->
-    <div style="padding:12px;background:rgba(255,255,255,0.03);border:1px solid #2a2a5a;border-radius:10px;margin-bottom:12px;">
-      <div style="font-size:10px;color:#778;margin-bottom:6px;display:flex;align-items:center;gap:4px;"><img src="images/pixr.png" style="width:14px;height:14px;object-fit:contain;image-rendering:pixelated;vertical-align:middle"> ОБМЕН PIXR → <img src="images/gram.png" style="width:14px;height:14px;object-fit:contain;image-rendering:pixelated;vertical-align:middle"> GRAM (1000:1)</div>
+    <div style="padding:12px;background:rgba(255,68,204,0.04);border:1px solid #3a1a5a;border-radius:10px;margin-bottom:10px;">
+      <div style="font-size:10px;color:#aa88cc;margin-bottom:6px;display:flex;align-items:center;gap:4px;">
+        <img src="images/pixr.png" style="width:13px;height:13px;object-fit:contain;image-rendering:pixelated;">
+        PIXR → <img src="images/gram.png" style="width:13px;height:13px;object-fit:contain;image-rendering:pixelated;"> GRAM
+        <span id="pixrGramRateLabel" style="margin-left:auto;color:#ff44cc;font-weight:bold;">...</span>
+      </div>
       <div style="display:flex;gap:8px;">
-        <input id="exchangeAmount" type="number" min="1000" step="1000" value="1000" 
-          style="flex:1;padding:8px 10px;background:#0d0d22;border:1px solid #2a2a5a;border-radius:6px;color:#fff;font-size:14px;font-family:'Courier New',monospace;">
-        <button onclick="submitExchange()" style="padding:8px 16px;background:linear-gradient(90deg,#4a2a8a,#7a4ad0);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;font-family:'Courier New',monospace;">
+        <input id="exchangeAmount" type="number" min="1000" step="1000" value="1000"
+          style="flex:1;padding:8px 10px;background:#0d0d22;border:1px solid #3a1a5a;border-radius:6px;color:#fff;font-size:14px;font-family:'Courier New',monospace;"
+          oninput="previewExchange()">
+        <button onclick="submitExchange()" style="padding:8px 14px;background:linear-gradient(90deg,#4a2a8a,#7a4ad0);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;font-family:'Courier New',monospace;">
           Обменять
         </button>
       </div>
-      <div id="exchangeResult" style="font-size:10px;color:#556;margin-top:4px;min-height:16px;"></div>
+      <div id="exchangePreview" style="font-size:10px;color:#778;margin-top:4px;min-height:14px;"></div>
+      <div id="exchangeResult" style="font-size:10px;color:#556;margin-top:2px;min-height:14px;"></div>
+    </div>
+    
+    <!-- Обмен GRAM → PIXR -->
+    <div style="padding:12px;background:rgba(64,208,255,0.04);border:1px solid #1a3a5a;border-radius:10px;margin-bottom:12px;">
+      <div style="font-size:10px;color:#80bbcc;margin-bottom:6px;display:flex;align-items:center;gap:4px;">
+        <img src="images/gram.png" style="width:13px;height:13px;object-fit:contain;image-rendering:pixelated;">
+        GRAM → <img src="images/pixr.png" style="width:13px;height:13px;object-fit:contain;image-rendering:pixelated;"> PIXR
+        <span style="margin-left:auto;color:#40d0ff;font-weight:bold;">1 GRAM = 800 PIXR</span>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <input id="exchangeGramAmount" type="number" min="1" step="1" value="1"
+          style="flex:1;padding:8px 10px;background:#0d0d22;border:1px solid #1a3a5a;border-radius:6px;color:#fff;font-size:14px;font-family:'Courier New',monospace;"
+          oninput="previewGramExchange()">
+        <button onclick="submitGramExchange()" style="padding:8px 14px;background:linear-gradient(90deg,#1a4a6a,#2a7aaa);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:bold;cursor:pointer;font-family:'Courier New',monospace;">
+          Обменять
+        </button>
+      </div>
+      <div id="gramExchangePreview" style="font-size:10px;color:#778;margin-top:4px;min-height:14px;"></div>
+      <div id="gramExchangeResult" style="font-size:10px;color:#556;margin-top:2px;min-height:14px;"></div>
     </div>
     
     <!-- Кнопки Пополнить/Вывести -->
@@ -560,43 +655,158 @@ function renderWallet() {
   
   document.getElementById('walletBody').innerHTML = html;
   loadTransactions();
+  loadExchangeStats();
+}
+
+// ── Загрузка статистики обмена ──
+function loadExchangeStats() {
+  fetch(window.GameSync._API + '/api/wallet/exchange-stats')
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (!r.ok) return;
+      _exchangeStats = r;
+      renderExchangeIndicator(r);
+      // Обновляем лейбл курса PIXR→GRAM
+      var lbl = document.getElementById('pixrGramRateLabel');
+      if (lbl) lbl.textContent = r.currentRate + ':1';
+      // Обновляем шаг инпута
+      var inp = document.getElementById('exchangeAmount');
+      if (inp) {
+        inp.min = r.currentRate;
+        inp.step = r.currentRate;
+        if (parseInt(inp.value) < r.currentRate) inp.value = r.currentRate;
+      }
+      previewExchange();
+    })
+    .catch(function() {});
+}
+
+function renderExchangeIndicator(stats) {
+  var el = document.getElementById('exchangeIndicatorInner');
+  if (!el) return;
+  var total = stats.totalExchanged || 0;
+  var threshold = stats.threshold || 5000000;
+  var pct = Math.min(100, Math.round(total / threshold * 100));
+  var reached = total >= threshold;
+  var remaining = Math.max(0, threshold - total);
+  var barColor = reached ? '#e74c3c' : (pct > 75 ? '#f5c542' : '#ff44cc');
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+      <span style="color:#aaa;font-size:10px;">Обменяно PIXR → GRAM</span>
+      <span style="color:${barColor};font-weight:bold;font-size:10px;">${total.toLocaleString()} / ${threshold.toLocaleString()}</span>
+    </div>
+    <div style="height:8px;background:#1a1a3a;border-radius:4px;overflow:hidden;margin-bottom:5px;">
+      <div style="height:100%;width:${pct}%;background:${barColor};border-radius:4px;transition:width 0.4s;"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:9px;">
+      ${reached
+        ? `<span style="color:#e74c3c;">⚠️ Порог достигнут — курс <b>2000 PIXR</b> за 1 GRAM</span>`
+        : `<span style="color:#778;">До повышения цены: <b style="color:#f5c542;">${remaining.toLocaleString()} PIXR</b></span>
+           <span style="color:#556;">${pct}%</span>`
+      }
+    </div>
+  `;
+}
+
+function previewExchange() {
+  var inp = document.getElementById('exchangeAmount');
+  var prev = document.getElementById('exchangePreview');
+  if (!inp || !prev) return;
+  var amount = parseInt(inp.value) || 0;
+  var rate = (_exchangeStats && _exchangeStats.currentRate) || 1000;
+  if (amount < rate || amount % rate !== 0) {
+    prev.innerHTML = '<span style="color:#e74c3c;">Сумма должна быть кратна ' + rate + ' PIXR</span>';
+    return;
+  }
+  var gram = amount / rate;
+  prev.innerHTML = '<span style="color:#778;">Получите: <b style="color:#40d0ff;">' + gram + ' GRAM</b></span>';
+}
+
+function previewGramExchange() {
+  var inp = document.getElementById('exchangeGramAmount');
+  var prev = document.getElementById('gramExchangePreview');
+  if (!inp || !prev) return;
+  var amount = parseInt(inp.value) || 0;
+  if (amount < 1) { prev.innerHTML = ''; return; }
+  var pixr = amount * 800;
+  prev.innerHTML = '<span style="color:#778;">Получите: <b style="color:#ff44cc;">' + pixr.toLocaleString() + ' PIXR</b></span>';
 }
 
 // ── ОБМЕН PIXR → GRAM ──
 function submitExchange() {
-  const amount = parseInt(document.getElementById('exchangeAmount').value);
-  const result = document.getElementById('exchangeResult');
-  
-  if (!amount || amount < 1000 || amount % 1000 !== 0) {
-    result.innerHTML = '<span style="color:#e74c3c;">Сумма должна быть кратна 1000 PIXR</span>';
+  var amount = parseInt(document.getElementById('exchangeAmount').value);
+  var result = document.getElementById('exchangeResult');
+  var rate = (_exchangeStats && _exchangeStats.currentRate) || 1000;
+
+  if (!amount || amount < rate || amount % rate !== 0) {
+    result.innerHTML = '<span style="color:#e74c3c;">Сумма должна быть кратна ' + rate + ' PIXR</span>';
     return;
   }
-  
+
   if (amount > (G.pixr || 0)) {
     result.innerHTML = '<span style="color:#e74c3c;">Недостаточно PIXR</span>';
     return;
   }
-  
+
   result.innerHTML = '<span style="color:#f5c542;">Обмен...</span>';
-  
+
   fetch(window.GameSync._API + '/api/wallet/exchange', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      initData: window.GameSync._INIT,
-      amount: amount
-    })
+    body: JSON.stringify({ initData: window.GameSync._INIT, amount: amount })
   })
-  .then(r => r.json())
-  .then(r => {
+  .then(function(r) { return r.json(); })
+  .then(function(r) {
+    if (r.ok) {
+      G.pixr = r.pixr;
+      G.gram = r.gram;
+      // Обновляем глобальную статистику
+      if (r.totalExchanged !== undefined && _exchangeStats) {
+        _exchangeStats.totalExchanged = r.totalExchanged;
+        _exchangeStats.currentRate = r.rate;
+      }
+      updateHUD();
+      result.innerHTML = '<span style="color:#2ecc71;">✅ Обменяно ' + amount + ' PIXR → ' + r.earned + ' GRAM</span>';
+      setTimeout(function() { renderWallet(); }, 1200);
+    } else {
+      result.innerHTML = '<span style="color:#e74c3c;">❌ ' + (r.error || 'Ошибка') + '</span>';
+    }
+  })
+  .catch(function() {
+    result.innerHTML = '<span style="color:#e74c3c;">❌ Ошибка соединения</span>';
+  });
+}
+
+// ── ОБМЕН GRAM → PIXR ──
+function submitGramExchange() {
+  var amount = parseInt(document.getElementById('exchangeGramAmount').value);
+  var result = document.getElementById('gramExchangeResult');
+
+  if (!amount || amount < 1 || !Number.isInteger(amount)) {
+    result.innerHTML = '<span style="color:#e74c3c;">Минимум 1 GRAM</span>';
+    return;
+  }
+
+  if (amount > Math.floor(G.gram || 0)) {
+    result.innerHTML = '<span style="color:#e74c3c;">Недостаточно GRAM</span>';
+    return;
+  }
+
+  result.innerHTML = '<span style="color:#f5c542;">Обмен...</span>';
+
+  fetch(window.GameSync._API + '/api/wallet/exchange-gram', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData: window.GameSync._INIT, amount: amount })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(r) {
     if (r.ok) {
       G.pixr = r.pixr;
       G.gram = r.gram;
       updateHUD();
-      result.innerHTML = `<span style="color:#2ecc71;">✅ Обменяно ${amount} PIXR → ${r.earned} GRAM</span>`;
-      setTimeout(function() {
-        renderWallet();
-      }, 1000);
+      result.innerHTML = '<span style="color:#2ecc71;">✅ Обменяно ' + amount + ' GRAM → ' + r.earned.toLocaleString() + ' PIXR</span>';
+      setTimeout(function() { renderWallet(); }, 1200);
     } else {
       result.innerHTML = '<span style="color:#e74c3c;">❌ ' + (r.error || 'Ошибка') + '</span>';
     }
@@ -953,10 +1163,17 @@ function submitWithdraw() {
 // ═══════════════════════════════
 function switchTab(tab) {
   activeTab = tab;
-  ['game','inv','upgrades','floors','rating','wallet','friends','pvp'].forEach(t => {
-    const btn = document.getElementById('nav' + t.charAt(0).toUpperCase() + t.slice(1));
+  ['game','inv','upgrades','floors','rating','wallet','friends'].forEach(function(t) {
+    var btn = document.getElementById('nav' + t.charAt(0).toUpperCase() + t.slice(1));
     if (btn) btn.classList.toggle('active', t === tab);
   });
+  // pvp-hud-btn, craft-hud-btn, rune-hud-btn показываем только на игровом экране
+  var pvpHud = document.getElementById('pvpHudBtn');
+  if (pvpHud) pvpHud.style.display = (tab === 'game') ? 'flex' : 'none';
+  var craftHud = document.getElementById('craftHudBtn');
+  if (craftHud) craftHud.style.display = (tab === 'game' && !!G_CHAR) ? 'flex' : 'none';
+  var runeHud = document.getElementById('runeHudBtn');
+  if (runeHud) runeHud.style.display = (tab === 'game' && !!G_CHAR) ? 'flex' : 'none';
   document.getElementById('panelInv').classList.toggle('visible',      tab === 'inv');
   document.getElementById('panelUpgrades').classList.toggle('visible', tab === 'upgrades');
   document.getElementById('panelFloors').classList.toggle('visible',   tab === 'floors');
@@ -966,6 +1183,10 @@ function switchTab(tab) {
   document.getElementById('panelPvp').classList.toggle('visible',      tab === 'pvp');
   var bossPanel = document.getElementById('panelBoss');
   if (bossPanel) bossPanel.classList.toggle('visible', tab === 'boss');
+  var craftPanel = document.getElementById('panelCraft');
+  if (craftPanel) craftPanel.classList.toggle('visible', tab === 'craft');
+  var runePanel = document.getElementById('panelRune');
+  if (runePanel) runePanel.classList.toggle('visible', tab === 'rune');
   var hudEl = document.getElementById('skillsHud');
   if (hudEl) hudEl.classList.toggle('visible', tab === 'game' && !!G_CHAR);
   var isGame = tab === 'game' && !!G_CHAR;
@@ -988,6 +1209,8 @@ function switchTab(tab) {
   if (tab === 'friends')  renderFriends();
   if (tab === 'boss')     renderBossTab();
   if (tab === 'pvp')      renderPvpLobby();
+  if (tab === 'craft')    renderCraft();
+  if (tab === 'rune')     renderRune();
 }
 
 // ═══════════════════════════════
@@ -1052,10 +1275,14 @@ function renderFriendsData(r, body) {
     '<button onclick="friendsShare(\'' + r.refLink + '\')" style="flex:1;padding:9px;font-size:11px;font-family:Courier New,monospace;border-radius:7px;border:1.5px solid #2ecc71;background:rgba(46,204,113,0.1);color:#2ecc71;cursor:pointer;">✈️ Поделиться</button>' +
     '</div></div>';
 
+  var gramSvg = '<img src="images/gram.png" width="13" height="13" style="vertical-align:middle;image-rendering:pixelated;margin-right:2px;">';
   var rewardHtml =
     '<div style="margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid #2a2a5a;border-radius:8px;font-size:10px;color:#667;">' +
     coinSvg + ' <span style="color:#f5c542;font-weight:bold">500 золота</span> за каждые 5 уровней друга · ' +
-    '<span style="color:#aaa">Уровни 5, 10, 15, 20...</span></div>';
+    '<span style="color:#aaa">Уровни 5, 10, 15, 20...</span>' +
+    '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #1e2040;">' +
+    gramSvg + ' <span style="color:#4fc3f7;font-weight:bold">+5% GRAM</span> от каждого пополнения баланса друга — автоматически на ваш счёт</div>' +
+    '</div>';
 
   var claimHtml = '';
   if (r.pendingGold > 0) {
@@ -1186,6 +1413,12 @@ let _csIdleImgs      = {};
 let G_CHAR           = null;
 
 function selectChar(id) {
+  // ✅ Проверка на авторизацию
+  if (!window.GameSync || !window.GameSync.state || !window.GameSync.state.online) {
+    showFriendsToast('❌ Открой игру через Telegram!');
+    return;
+  }
+  
   _csSelected = id;
   ['fire','light','water'].forEach(function(c) {
     document.getElementById('card-' + c).classList.toggle('selected', c === id);
@@ -1196,6 +1429,12 @@ function selectChar(id) {
 }
 
 function confirmChar() {
+  // ✅ Проверка на авторизацию
+  if (!window.GameSync || !window.GameSync.state || !window.GameSync.state.online) {
+    showFriendsToast('❌ Открой игру через Telegram!');
+    return;
+  }
+  
   if (!_csSelected) return;
   Object.values(_csSpriteTimers).forEach(clearInterval);
   if (_csParticleTimer) cancelAnimationFrame(_csParticleTimer);
@@ -1680,7 +1919,7 @@ function callBoss(bossId) {
 //  МАРКЕТ
 // ═══════════════════════════════════════════════════════
 
-var _marketTab    = 'all';   // 'all' | 'my'
+var _marketTab    = 'all';   // 'all' | 'my' | 'history'
 var _marketFilter = 'all';   // 'all' | rarity | 'book'
 var _sellItemId   = null;
 
@@ -1727,9 +1966,35 @@ function switchMarketTab(tab) {
   loadMarketListings();
 }
 
+// ── Забрать PIXR за проданный лот ──
+function claimListing(listingId, earned) {
+  var API  = window.GameSync._API;
+  var init = window.GameSync._INIT;
+  fetch(API + '/api/market/claim', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData: init, listingId: listingId })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.ok) {
+      G.pixr = d.pixr;
+      updateMarketPixrBal();
+      window.GameSync.saveInstant({ pixr: G.pixr });
+      _taskToast('✅ Получено: +' + d.earned + ' 💎 PIXR');
+      loadMarketListings();
+    } else {
+      _taskToast('❌ Ошибка: ' + (d.error || 'неизвестно'));
+    }
+  })
+  .catch(function() { _taskToast('❌ Ошибка сети'); });
+}
+
 function _syncMarketTabs() {
   document.getElementById('marketTabAll').classList.toggle('active', _marketTab === 'all');
   document.getElementById('marketTabMy').classList.toggle('active', _marketTab === 'my');
+  var histBtn = document.getElementById('marketTabHistory');
+  if (histBtn) histBtn.classList.toggle('active', _marketTab === 'history');
 }
 
 // ── Фильтры ──
@@ -1765,6 +2030,15 @@ function loadMarketListings() {
     .then(function(r) { return r.json(); })
     .then(function(d) { renderMarketListings(d.listings || [], true); })
     .catch(function() { body.innerHTML = '<div class="market-empty">Ошибка загрузки</div>'; });
+  } else if (_marketTab === 'history') {
+    fetch(API + '/api/market/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: init })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) { renderMarketHistory(d.listings || []); })
+    .catch(function() { body.innerHTML = '<div class="market-empty">Ошибка загрузки</div>'; });
   } else {
     fetch(API + '/api/market/list', {
       method: 'POST',
@@ -1775,6 +2049,74 @@ function loadMarketListings() {
     .then(function(d) { renderMarketListings(d.listings || [], false); })
     .catch(function() { body.innerHTML = '<div class="market-empty">Ошибка загрузки</div>'; });
   }
+}
+
+// ── История продаж ──
+function renderMarketHistory(listings) {
+  var body = document.getElementById('marketBody');
+  if (!body) return;
+
+  if (listings.length === 0) {
+    body.innerHTML = '<div class="market-empty">📋 История пуста.<br><span style="font-size:10px">Проданные и отменённые лоты появятся здесь.</span></div>';
+    return;
+  }
+
+  var html = '';
+  listings.forEach(function(lst) {
+    var item = lst.item || {};
+    var r    = RARITIES.find(function(x) { return x.id === item.rarity; }) || { color: '#888', name: '—' };
+    var stars = (item.refine || 0);
+    var isOre = !!item.isOre;
+
+    var iconHtml = item.isSkillBook
+      ? '<span style="font-size:22px;line-height:1;">📖</span>'
+      : '<img src="' + (item.icon || '') + '" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated;" onerror="this.style.opacity=0.3">';
+
+    var nameHtml = '<div style="font-size:13px;font-weight:bold;color:' + r.color + ';margin-bottom:2px;">' +
+      (item.name || '—') +
+      (stars > 0 ? ' <span style="color:#a78bfa">+' + stars + '</span>' : '') +
+      (isOre ? ' <span style="font-size:10px;color:#aaa">×' + (item.qty||1) + '</span>' : '') +
+    '</div>';
+
+    var isSold      = lst.status === 'sold';
+    var isCancelled = lst.status === 'cancelled';
+    var statusColor = isSold ? '#2ecc71' : '#e74c3c';
+    var statusText  = isSold ? '✅ Продано' : '❌ Отменён/Истёк';
+
+    var dateStr = '';
+    if (isSold && lst.soldAt) {
+      var d = new Date(lst.soldAt);
+      dateStr = d.getDate() + '.' + (d.getMonth()+1) + '.' + d.getFullYear() + ' ' +
+        String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    } else if (isCancelled && lst.cancelledAt) {
+      var d2 = new Date(lst.cancelledAt);
+      dateStr = d2.getDate() + '.' + (d2.getMonth()+1) + '.' + d2.getFullYear() + ' ' +
+        String(d2.getHours()).padStart(2,'0') + ':' + String(d2.getMinutes()).padStart(2,'0');
+    }
+
+    var priceStr = isSold
+      ? (lst.pendingPixr != null
+          ? (lst.claimedAt ? '+' + lst.pendingPixr + ' 💎 (получено)' : '+' + lst.pendingPixr + ' 💎')
+          : lst.price + ' 💎')
+      : lst.price + ' 💎 (не продано)';
+
+    html += '<div class="market-listing" style="opacity:' + (isCancelled ? '0.6' : '1') + ';">' +
+      '<div class="market-listing-icon" style="border-color:' + r.color + '55;">' + iconHtml + '</div>' +
+      '<div class="market-listing-info">' +
+        nameHtml +
+        '<div style="font-size:11px;margin-bottom:3px;">' +
+          '<span style="color:' + statusColor + ';font-weight:bold;">' + statusText + '</span>' +
+          (dateStr ? ' <span style="color:#556;font-size:10px;">· ' + dateStr + '</span>' : '') +
+        '</div>' +
+        (lst.buyerName && isSold ? '<div style="font-size:10px;color:#778;">Покупатель: ' + lst.buyerName + '</div>' : '') +
+      '</div>' +
+      '<div style="text-align:right;">' +
+        '<div style="font-size:12px;font-weight:bold;color:' + (isSold ? '#2ecc71' : '#556') + ';">' + priceStr + '</div>' +
+      '</div>' +
+    '</div>';
+  });
+
+  body.innerHTML = html;
 }
 
 // ── Отрисовка списка лотов ──
@@ -1790,23 +2132,72 @@ function renderMarketListings(listings, isMy) {
     return;
   }
 
+  var _slotNames  = { weapon:'Оружие', body:'Нагрудник', legs:'Штаны', gloves:'Перчатки', boots:'Боты', helmet:'Шлем', ring:'Кольцо', belt:'Пояс' };
+  var _classCols  = { fire:'#ff7030', light:'#ffd040', water:'#40d0ff' };
+  var _classLbls  = { fire:'Пирокан', light:'Люмос', water:'Аквас' };
+  var _statCols   = { atk:'#ff6b6b', def:'#4ecdc4', hp:'#a8e063', spd:'#f5c542', crit:'#ff9f43', dodge:'#a78bfa' };
+  var _statLbls   = { atk:'ATK', def:'DEF', hp:'HP', spd:'SPD', crit:'CRIT%', dodge:'DODGE%' };
+
   var html = '';
   listings.forEach(function(lst) {
-    var item     = lst.item || {};
-    var r        = RARITIES.find(function(x) { return x.id === item.rarity; }) || { color: '#888', name: '—' };
-    var isBook   = item.isSkillBook;
+    var item   = lst.item || {};
+    var r      = RARITIES.find(function(x) { return x.id === item.rarity; }) || { color: '#888', name: '—' };
+    var isBook = item.isSkillBook;
+    var isOre  = !!item.isOre;
     var iconHtml = isBook
       ? '<span style="font-size:22px;line-height:1;">📖</span>'
       : '<img src="' + (item.icon || '') + '" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated;" onerror="this.style.display=\'none\'">';
 
-    var subParts = [r.name];
+    // Строка 1: Название + refine + Lv.X бейдж
+    var lvBadge = isOre
+      ? ' <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.07);border:1px solid #444;color:#bbb;vertical-align:middle;">×' + (item.qty || 1) + ' шт.</span>'
+      : (!isBook && item.level)
+        ? ' <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.07);border:1px solid #444;color:#bbb;vertical-align:middle;">Lv.' + item.level + '</span>'
+        : (isBook && item.level ? ' <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.07);border:1px solid #444;color:#bbb;vertical-align:middle;">Lv.' + item.level + '</span>' : '');
+    var soldBadge = (isMy && lst.status === 'sold' && !lst.claimedAt)
+      ? ' <span style="font-size:9px;padding:2px 6px;border-radius:3px;background:rgba(46,204,113,0.2);border:1px solid #2ecc71;color:#2ecc71;vertical-align:middle;">ПРОДАНО</span>'
+      : '';
+    var nameHtml = '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:3px;">' +
+      '<span style="font-size:13px;font-weight:bold;color:' + r.color + ';">' +
+        (item.name || '—') +
+        (item.refine ? ' <span style="color:#a78bfa">+' + item.refine + '</span>' : '') +
+      '</span>' + lvBadge + soldBadge + '</div>';
+
+    // Строка 2: редкость · слот · класс · продавец
+    var subParts = ['<span style="color:' + r.color + ';">' + r.name + '</span>'];
+    if (!isBook && item.slot && _slotNames[item.slot]) subParts.push(_slotNames[item.slot]);
     if (isBook && item.bookSkillName) subParts.push(item.bookSkillName);
-    if (item.forClass && item.classLabel) subParts.push(item.classLabel);
-    if (!isMy) subParts.push(lst.sellerName || 'Игрок');
+    if (item.forClass) {
+      var cc = _classCols[item.forClass] || '#aaa';
+      var cl = _classLbls[item.forClass] || item.forClass;
+      subParts.push('<span style="color:' + cc + ';">' + cl + '</span>');
+    }
+    if (!isMy) subParts.push('<span style="color:#778;">' + (lst.sellerName || 'Игрок') + '</span>');
+    var subHtml = '<div style="font-size:11px;margin-bottom:4px;">' + subParts.join(' · ') + '</div>';
+
+    // Строка 3: бейджи статов
+    var statBadges = '';
+    if (!isBook && item.stats) {
+      Object.keys(item.stats).forEach(function(s) {
+        if (!item.stats[s]) return;
+        var col = _statCols[s] || '#aaa';
+        statBadges += '<span style="font-size:9px;padding:2px 6px;border-radius:3px;border:1px solid ' + col + '55;background:' + col + '18;color:' + col + ';margin-right:4px;">+' + item.stats[s] + ' ' + (_statLbls[s] || s) + '</span>';
+      });
+    }
+    var statsHtml = statBadges ? '<div style="margin-bottom:4px;">' + statBadges + '</div>' : '';
+
+    // Строка 4: таймер
+    var timeLeft = lst.expiresAt - Date.now();
+    var timerCol = timeLeft > 4 * 3600000 ? '#2ecc71' : timeLeft > 3600000 ? '#f5c542' : '#e74c3c';
+    var timerHtml = '<div style="font-size:9px;color:' + timerCol + ';">⏱ ' + marketTimeLeft(lst.expiresAt) + '</div>';
 
     var actionBtn = '';
     if (isMy) {
-      actionBtn = '<button class="market-cancel-btn" onclick="cancelListing(\'' + lst.listingId + '\')">Снять</button>';
+      if (lst.status === 'sold' && !lst.claimedAt && lst.pendingPixr > 0) {
+        actionBtn = '<button class="market-claim-btn" onclick="claimListing(\'' + lst.listingId + '\', ' + lst.pendingPixr + ')">💰 Забрать<br><span style="font-size:10px;color:#2ecc71;">+' + lst.pendingPixr + ' 💎</span></button>';
+      } else if (lst.status === 'active') {
+        actionBtn = '<button class="market-cancel-btn" onclick="cancelListing(\'' + lst.listingId + '\')">Снять</button>';
+      }
     } else {
       var isSelf    = lst.sellerId === (window.GameSync && window.GameSync.getTgId ? window.GameSync.getTgId() : '');
       var canAfford = (G.pixr || 0) >= lst.price;
@@ -1817,11 +2208,9 @@ function renderMarketListings(listings, isMy) {
     }
 
     html += '<div class="market-listing">' +
-      '<div class="market-listing-icon" style="border-color:' + r.color + '44;">' + iconHtml + '</div>' +
+      '<div class="market-listing-icon" style="border-color:' + r.color + '55;">' + iconHtml + '</div>' +
       '<div class="market-listing-info">' +
-        '<div class="market-listing-name" style="color:' + r.color + ';">' + (item.name || '—') + (item.refine ? ' <span style="color:#a78bfa">+' + item.refine + '</span>' : '') + '</div>' +
-        '<div class="market-listing-sub">' + subParts.join(' · ') + '</div>' +
-        '<div class="market-lot-timer">⏱ ' + marketTimeLeft(lst.expiresAt) + '</div>' +
+        nameHtml + subHtml + statsHtml + timerHtml +
       '</div>' +
       '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">' +
         '<div class="market-listing-price">' + lst.price.toLocaleString() + ' 💎</div>' +
@@ -1834,6 +2223,35 @@ function renderMarketListings(listings, isMy) {
 }
 
 // ── Купить лот ──
+// ── Синхронизация инвентаря с сервера (сохраняет _equipped и G.equipped) ──
+function syncInventoryFromServer(rawInventory) {
+  var SLOTS = ['weapon','body','legs','gloves','boots','helmet','ring','belt'];
+  // Фильтруем руду — она не должна попадать в G.inventory
+  var newInv = (rawInventory || []).filter(function(it) { return !it.isOre; }).map(function(it) {
+    var c = Object.assign({}, it);
+    c._equipped = false;
+    return c;
+  });
+  // Восстанавливаем G.equipped — ищем предметы по id
+  SLOTS.forEach(function(slot) {
+    var cur = G.equipped[slot];
+    if (!cur) return;
+    var found = newInv.find(function(i) { return i.id === cur.id; });
+    if (found) {
+      found._equipped = true;
+      G.equipped[slot] = found;
+    } else {
+      // Предмет не найден в новом инвентаре — НЕ обнуляем слот автоматически,
+      // сохраняем текущий объект чтобы saveInstant не затёр equipped на сервере
+      // Слот обнуляется только явно (unequip, sell)
+    }
+  });
+  G.inventory = newInv;
+  // Пересчитываем статы и CP после любого изменения инвентаря
+  if (typeof recalcStats === 'function') recalcStats();
+  if (typeof updateHUD === 'function') updateHUD();
+}
+
 function buyListing(listingId, price) {
   if (!confirm('Купить за ' + price + ' PIXR?')) return;
   var API  = window.GameSync._API;
@@ -1847,12 +2265,23 @@ function buyListing(listingId, price) {
   .then(function(d) {
     if (d.ok) {
       G.pixr = d.pixr;
-      if (d.item) G.inventory.push(d.item);
+      if (d.ore) {
+        // Куплена руда — обновляем G.ore, инвентарь не трогаем
+        if (!G.ore) G.ore = {};
+        Object.keys(d.ore).forEach(function(k) { G.ore[k] = d.ore[k]; });
+        if (typeof renderInventory === 'function') renderInventory();
+        if (typeof renderCraft === 'function') renderCraft();
+      } else if (d.inventory) {
+        syncInventoryFromServer(d.inventory);
+        if (typeof renderInventory === 'function') renderInventory();
+      } else if (d.item && !d.item.isOre) {
+        syncInventoryFromServer(G.inventory.concat([d.item]));
+        if (typeof renderInventory === 'function') renderInventory();
+      }
       updateMarketPixrBal();
       loadMarketListings();
       _taskToast('✅ Куплено: ' + (d.item && d.item.name || 'предмет'));
-      if (typeof renderInventory === 'function') renderInventory();
-      window.GameSync.saveInstant();
+      // НЕ вызываем saveInstant — данные уже сохранены на сервере атомарно
     } else {
       var msgs = {
         already_sold:    '❌ Кто-то успел купить раньше!',
@@ -1881,13 +2310,19 @@ function cancelListing(listingId) {
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.ok) {
-      if (d.inventory) {
-        G.inventory = d.inventory;
+      if (d.ore) {
+        // Лот был с рудой — обновляем G.ore
+        if (!G.ore) G.ore = {};
+        Object.keys(d.ore).forEach(function(k) { G.ore[k] = d.ore[k]; });
+        if (typeof renderInventory === 'function') renderInventory();
+        if (typeof renderCraft === 'function') renderCraft();
+      } else if (d.inventory) {
+        syncInventoryFromServer(d.inventory);
         if (typeof renderInventory === 'function') renderInventory();
       }
       loadMarketListings();
       _taskToast('✅ Лот снят, предмет возвращён');
-      window.GameSync.saveInstant();
+      // saveInstant не нужен — сервер уже вернул предмет атомарно
     } else {
       _taskToast('❌ Ошибка: ' + d.error);
     }
@@ -1985,11 +2420,11 @@ function confirmSellItem() {
   .then(function(d) {
     if (btn) btn.disabled = false;
     if (d.ok) {
-      G.inventory = d.inventory;
+      syncInventoryFromServer(d.inventory);
       closeSellModal();
       if (typeof renderInventory === 'function') renderInventory();
       _taskToast('✅ Предмет выставлен на маркет!');
-      window.GameSync.saveInstant();
+      // saveInstant не нужен — сервер уже удалил предмет атомарно
     } else {
       var msgs = {
         max_lots:       '❌ Максимум 3 активных лота',
@@ -2010,14 +2445,17 @@ function confirmSellItem() {
 // ── Серверные уведомления ──
 window._handleMarketNotif = function(event, data) {
   if (event === 'market_sold') {
-    _taskToast('💰 Продано: "' + data.itemName + '" +' + data.earned + ' 💎');
-    G.pixr = (G.pixr || 0) + data.earned;
-    window.GameSync.saveInstant();
+    // PIXR не начисляется автоматически — нужно забрать вручную в "Мои лоты"
+    _taskToast('💰 Продано: "' + data.itemName + '" · Зайди в Мои лоты чтобы забрать ' + data.earned + ' 💎');
   } else if (event === 'market_expired') {
     _taskToast('⏰ Лот истёк, "' + (data.item && data.item.name) + '" возвращён');
-    if (data.item) G.inventory.push(data.item);
+    if (data.item && !data.item.isOre) { syncInventoryFromServer(G.inventory.concat([data.item])); }
+    if (data.item && data.item.isOre) {
+      if (!G.ore) G.ore = {};
+      G.ore[data.item.oreId] = (G.ore[data.item.oreId] || 0) + (data.item.qty || 1);
+    }
     if (typeof renderInventory === 'function') renderInventory();
-    window.GameSync.saveInstant();
+    window.GameSync.saveInstant({ inventory: (G.inventory||[]).map(function(i){var c=Object.assign({},i);delete c._equipped;return c;}), ore: G.ore });
   }
 };
 
@@ -2636,44 +3074,196 @@ function _pvpRender() {
   var ctx2 = cv.getContext('2d');
   var W2 = cv.width, H2 = cv.height;
   var b = _pvpBattle;
+  var t = performance.now() * 0.001;
 
-  // Фон арены
-  ctx2.fillStyle = '#0d0d1a';
-  ctx2.fillRect(0, 0, W2, H2);
+  ctx2.imageSmoothingEnabled = false;
 
-  // Арена — градиент пола
-  var ground = H2 * 0.72;
-  var skyGrad = ctx2.createLinearGradient(0, 0, 0, ground);
-  skyGrad.addColorStop(0, '#0a0a20');
-  skyGrad.addColorStop(1, '#1a0a30');
+  // ── НЕБО ──
+  var skyGrad = ctx2.createLinearGradient(0, 0, 0, H2 * 0.68);
+  skyGrad.addColorStop(0, '#04020e');
+  skyGrad.addColorStop(0.5, '#0d0420');
+  skyGrad.addColorStop(1, '#1a0830');
   ctx2.fillStyle = skyGrad;
-  ctx2.fillRect(0, 0, W2, ground);
+  ctx2.fillRect(0, 0, W2, H2 * 0.68);
 
-  // Пол
+  // ── ЗВЁЗДЫ (мигающие) ──
+  ctx2.fillStyle = '#ffffff';
+  var stars = [
+    [0.08,0.05],[0.18,0.12],[0.32,0.04],[0.45,0.09],[0.55,0.03],
+    [0.67,0.14],[0.78,0.07],[0.88,0.11],[0.13,0.20],[0.38,0.18],
+    [0.62,0.22],[0.82,0.19],[0.25,0.28],[0.72,0.25],[0.50,0.30],
+    [0.05,0.32],[0.92,0.28],[0.40,0.35],[0.60,0.08],[0.70,0.32],
+  ];
+  for (var s = 0; s < stars.length; s++) {
+    var sa = 0.4 + 0.6 * Math.abs(Math.sin(t * 1.3 + s * 2.1));
+    ctx2.globalAlpha = sa;
+    var sz = (s % 3 === 0) ? 2 : 1;
+    ctx2.fillRect(Math.floor(stars[s][0] * W2), Math.floor(stars[s][1] * H2), sz, sz);
+  }
+  ctx2.globalAlpha = 1;
+
+  // ── ЛУНА (пиксельная) ──
+  var moonX = Math.floor(W2 * 0.85), moonY = Math.floor(H2 * 0.10);
+  var moonPx = [
+    [2,0,4],[0,1,8],[0,2,8],[0,3,8],[1,4,6],[2,5,4]
+  ];
+  var PS = 4;
+  for (var mp = 0; mp < moonPx.length; mp++) {
+    var mx = moonX + moonPx[mp][0] * PS;
+    var my = moonY + mp * PS;
+    var mw = moonPx[mp][2] * PS;
+    ctx2.fillStyle = (mp < 2) ? '#e8e0b0' : '#d4c880';
+    ctx2.fillRect(mx, my, mw, PS);
+  }
+  // Кратер
+  ctx2.fillStyle = '#c0b060';
+  ctx2.fillRect(moonX + 3*PS, moonY + 2*PS, PS, PS);
+  ctx2.fillRect(moonX + 5*PS, moonY + 4*PS, PS, PS);
+
+  // ── ФОН: задние стены арены ──
+  var ground = Math.floor(H2 * 0.70);
+
+  // Стена задняя
+  ctx2.fillStyle = '#120828';
+  ctx2.fillRect(0, Math.floor(H2 * 0.50), W2, ground - Math.floor(H2 * 0.50));
+
+  // Кирпичная кладка (пиксельная)
+  var brickH = 8, brickW = 20;
+  ctx2.fillStyle = '#1a0f30';
+  for (var by = Math.floor(H2 * 0.50); by < ground; by += brickH) {
+    var rowOffset = (Math.floor(by / brickH) % 2) * (brickW / 2);
+    for (var bx = -brickW + rowOffset; bx < W2; bx += brickW) {
+      ctx2.fillRect(bx, by, brickW - 1, brickH - 1);
+    }
+  }
+  // Горизонтальные швы чуть светлее
+  ctx2.fillStyle = '#0e0620';
+  for (var by2 = Math.floor(H2 * 0.50); by2 < ground; by2 += brickH) {
+    ctx2.fillRect(0, by2 + brickH - 1, W2, 1);
+  }
+
+  // ── ФОНАРИ С ЧЕРЕПАМИ (4 штуки) ──
+  var lanternPositions = [0.10, 0.35, 0.65, 0.90];
+  for (var li = 0; li < 4; li++) {
+    var lx = Math.floor(W2 * lanternPositions[li]);
+    var ly = Math.floor(H2 * 0.42);
+    var flicker = 0.75 + 0.25 * Math.abs(Math.sin(t * 3.7 + li * 1.8 + Math.sin(t * 11 + li)));
+
+    // Свечение фонаря
+    var glowR = ctx2.createRadialGradient(lx, ly + 20, 0, lx, ly + 20, 55);
+    glowR.addColorStop(0, 'rgba(180,100,255,' + (0.22 * flicker) + ')');
+    glowR.addColorStop(0.5,'rgba(100,40,180,' + (0.12 * flicker) + ')');
+    glowR.addColorStop(1, 'rgba(60,0,120,0)');
+    ctx2.fillStyle = glowR;
+    ctx2.beginPath(); ctx2.arc(lx, ly + 20, 55, 0, Math.PI * 2); ctx2.fill();
+
+    // Цепь (пиксельная)
+    ctx2.fillStyle = '#3a2a5a';
+    for (var ch = 0; ch < 4; ch++) {
+      ctx2.fillRect(lx - 1, ly - 16 + ch * 4, 3, 2);
+    }
+
+    // Корпус фонаря
+    var S = 3; // пиксель-размер
+    var fx = lx - 5*S, fy = ly;
+    // Верхняя крышка
+    ctx2.fillStyle = '#2a1a4a';
+    ctx2.fillRect(fx - S, fy, 12*S, S);
+    ctx2.fillRect(fx, fy - S, 10*S, S);
+    // Боковины
+    ctx2.fillStyle = '#1e1030';
+    ctx2.fillRect(fx - S, fy + S, S, 7*S);
+    ctx2.fillRect(fx + 10*S, fy + S, S, 7*S);
+    // Внутренность — свет черепа
+    var innerAlpha = 0.55 * flicker;
+    ctx2.fillStyle = 'rgba(200,120,255,' + innerAlpha + ')';
+    ctx2.fillRect(fx, fy + S, 10*S, 7*S);
+    // Нижняя крышка
+    ctx2.fillStyle = '#2a1a4a';
+    ctx2.fillRect(fx - S, fy + 8*S, 12*S, S);
+    ctx2.fillRect(fx, fy + 9*S, 10*S, S);
+
+    // ── ЧЕРЕП внутри фонаря (пиксельный) ──
+    var skx = fx + S, sky2 = fy + 2*S;
+    var P = S - 1; // чуть меньше чтобы вписаться
+    // Макушка черепа
+    ctx2.fillStyle = 'rgba(240,220,255,' + (0.85 * flicker) + ')';
+    // Строки пикселей черепа 8x6:
+    var skullRows = [
+      [1,1,1,1,1,1,1,1],  // 0
+      [1,1,1,1,1,1,1,1],  // 1
+      [1,0,1,1,1,1,0,1],  // 2  (глаза)
+      [1,0,1,1,1,1,0,1],  // 3
+      [1,1,1,1,1,1,1,1],  // 4
+      [0,1,0,1,1,0,1,0],  // 5  (зубы)
+    ];
+    for (var sr = 0; sr < skullRows.length; sr++) {
+      for (var sc2 = 0; sc2 < skullRows[sr].length; sc2++) {
+        if (skullRows[sr][sc2]) {
+          if (sr === 5) {
+            ctx2.fillStyle = 'rgba(240,220,255,' + (0.7 * flicker) + ')';
+          } else if ((sr === 2 || sr === 3) && (sc2 === 1 || sc2 === 6)) {
+            ctx2.fillStyle = 'rgba(30,0,60,' + (0.95) + ')'; // глаза тёмные
+          } else {
+            ctx2.fillStyle = 'rgba(240,220,255,' + (0.85 * flicker) + ')';
+          }
+          ctx2.fillRect(skx + sc2 * P, sky2 + sr * P, P, P);
+        }
+      }
+    }
+    // Глаза черепа — мерцающее свечение
+    var eyeGlow = ctx2.createRadialGradient(skx + P, sky2 + 2*P, 0, skx + P, sky2 + 2*P, 4);
+    eyeGlow.addColorStop(0, 'rgba(220,100,255,' + (0.8 * flicker) + ')');
+    eyeGlow.addColorStop(1, 'rgba(180,50,255,0)');
+    ctx2.fillStyle = eyeGlow;
+    ctx2.beginPath(); ctx2.arc(skx + P, sky2 + 2.5*P, 4, 0, Math.PI*2); ctx2.fill();
+    ctx2.beginPath(); ctx2.arc(skx + 6*P, sky2 + 2.5*P, 4, 0, Math.PI*2); ctx2.fill();
+  }
+
+  // ── КОСТИ на полу (пиксельные, статичные) ──
+  var bonePositions = [0.18, 0.42, 0.58, 0.82];
+  for (var bi = 0; bi < bonePositions.length; bi++) {
+    var bonex = Math.floor(W2 * bonePositions[bi]);
+    var boney = ground - 6;
+    ctx2.fillStyle = '#3a2a5a';
+    // Кость: горизонтальная палка + шарики по краям
+    ctx2.fillRect(bonex - 10, boney, 20, 3);
+    ctx2.fillRect(bonex - 13, boney - 2, 5, 7);
+    ctx2.fillRect(bonex + 8, boney - 2, 5, 7);
+    ctx2.fillStyle = '#4a3a7a';
+    ctx2.fillRect(bonex - 12, boney - 1, 3, 5);
+    ctx2.fillRect(bonex + 9, boney - 1, 3, 5);
+  }
+
+  // ── ПОЛ АРЕНЫ ──
   var floorGrad = ctx2.createLinearGradient(0, ground, 0, H2);
-  floorGrad.addColorStop(0, '#2a1a4a');
-  floorGrad.addColorStop(1, '#1a0a30');
+  floorGrad.addColorStop(0, '#1e0e38');
+  floorGrad.addColorStop(0.3, '#160a2e');
+  floorGrad.addColorStop(1, '#0a0418');
   ctx2.fillStyle = floorGrad;
   ctx2.fillRect(0, ground, W2, H2 - ground);
 
-  // Линия пола
-  ctx2.fillStyle = '#4a2a8a';
-  ctx2.fillRect(0, ground, W2, 2);
-
-  // Фоновые огни арены
-  var t = performance.now() * 0.001;
-  for (var lamp = 0; lamp < 4; lamp++) {
-    var lx = W2 * (0.15 + lamp * 0.23);
-    var ly = H2 * 0.12;
-    var la = 0.15 + Math.sin(t + lamp) * 0.05;
-    var lg = ctx2.createRadialGradient(lx, ly, 0, lx, ly, 60);
-    lg.addColorStop(0, 'rgba(150,80,255,' + la + ')');
-    lg.addColorStop(1, 'rgba(80,20,120,0)');
-    ctx2.fillStyle = lg;
-    ctx2.beginPath(); ctx2.arc(lx, ly, 60, 0, Math.PI * 2); ctx2.fill();
+  // Плитка пола (пиксельная)
+  var tileS = 16;
+  for (var tx = 0; tx < W2; tx += tileS) {
+    for (var ty2 = ground; ty2 < H2; ty2 += tileS) {
+      var tileIdx = (Math.floor(tx/tileS) + Math.floor((ty2-ground)/tileS)) % 2;
+      ctx2.fillStyle = tileIdx === 0 ? 'rgba(50,20,90,0.4)' : 'rgba(30,10,60,0.4)';
+      ctx2.fillRect(tx, ty2, tileS - 1, tileS - 1);
+    }
   }
 
-  // Позиции бойцов
+  // Линия пола + свечение
+  var edgeGlow = ctx2.createLinearGradient(0, ground - 4, 0, ground + 6);
+  edgeGlow.addColorStop(0, 'rgba(160,80,255,0.6)');
+  edgeGlow.addColorStop(0.5, 'rgba(120,50,200,0.3)');
+  edgeGlow.addColorStop(1, 'rgba(80,20,150,0)');
+  ctx2.fillStyle = edgeGlow;
+  ctx2.fillRect(0, ground - 4, W2, 10);
+  ctx2.fillStyle = '#8040cc';
+  ctx2.fillRect(0, ground, W2, 2);
+
+  // ── Позиции бойцов ──
   var SPRITE_W = 128, SPRITE_H = 128;
   var myX  = Math.floor(W2 * 0.22);
   var oppX = Math.floor(W2 * 0.68);
@@ -3028,3 +3618,353 @@ function _pvpRenderHistoryData(d, body) {
 
 
 
+
+// ═══════════════════════════════
+//  ВКЛАДКА КРАФТ
+// ═══════════════════════════════
+function renderCraft() {
+  var body = document.getElementById('craftBody');
+  if (!body) return;
+  if (!G.ore) G.ore = {};
+  if (!G.runes) G.runes = {};
+
+  // Секция руды
+  var oreHtml = '<div style="margin-bottom:16px;">' +
+    '<div style="font-size:10px;color:#556;letter-spacing:1px;margin-bottom:8px;">МАТЕРИАЛЫ</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+  ORE_TYPES.forEach(function(ore) {
+    var qty = G.ore[ore.id] || 0;
+    var r = RARITIES.find(function(x) { return x.id === ore.rarity; }) || { color: '#888' };
+    oreHtml += '<div style="display:flex;align-items:center;gap:5px;background:rgba(255,255,255,0.04);border:1px solid #1e1e3a;border-radius:8px;padding:6px 10px;">' +
+      '<img src="' + ore.icon + '" style="width:22px;height:22px;image-rendering:pixelated;" onerror="this.style.opacity=0.3">' +
+      '<div><div style="font-size:10px;color:' + r.color + ';">' + ore.name + '</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#ccd;">×' + qty + '</div></div>' +
+    '</div>';
+  });
+  oreHtml += '</div></div>';
+
+  // Секция рун (в крафте)
+  var hasRunes = RUNE_TYPES.some(function(rt) { return (G.runes[rt.id] || 0) > 0; });
+  var runeHtml = '<div style="margin-bottom:16px;">' +
+    '<div style="font-size:10px;color:#556;letter-spacing:1px;margin-bottom:8px;">РУНЫ</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+  if (hasRunes) {
+    RUNE_TYPES.forEach(function(rt) {
+      var qty = G.runes[rt.id] || 0;
+      if (qty <= 0) return;
+      var rc = RARITIES.find(function(x) { return x.id === rt.rarity; }) || { color: '#888' };
+      runeHtml += '<div style="display:flex;align-items:center;gap:5px;background:rgba(255,255,255,0.04);border:1px solid ' + rc.color + '44;border-radius:8px;padding:6px 10px;">' +
+        '<img src="' + rt.icon + '" style="width:22px;height:22px;image-rendering:pixelated;" onerror="this.style.opacity=0.3">' +
+        '<div><div style="font-size:9px;color:' + rc.color + ';">' + rt.name + '</div>' +
+        '<div style="font-size:13px;font-weight:700;color:#ccd;">×' + qty + '</div></div>' +
+      '</div>';
+    });
+  } else {
+    runeHtml += '<div style="color:#334;font-size:11px;padding:6px 0;">Рун нет — скрафти!</div>';
+  }
+  runeHtml += '</div></div>';
+
+  // Камни безопасной заточки (счётчик)
+  var blessCount = G.blessStones || 0;
+  var blessHtml = '<div style="display:flex;align-items:center;gap:10px;background:rgba(46,204,113,0.05);border:1px solid rgba(46,204,113,0.2);border-radius:8px;padding:8px 12px;margin-bottom:16px;">' +
+    '<img src="images/bless.png" style="width:28px;height:28px;image-rendering:pixelated;" onerror="this.textContent=\'🛡\'">' +
+    '<div><div style="font-size:11px;color:#2ecc71;font-weight:700;">Камень безопасной заточки</div>' +
+    '<div style="font-size:10px;color:#556;">В наличии: <span style="color:#ccd;font-weight:700;">' + blessCount + ' шт.</span></div></div>' +
+  '</div>';
+
+  // Рецепты
+  var recipesHtml = '<div style="font-size:10px;color:#556;letter-spacing:1px;margin-bottom:10px;">РЕЦЕПТЫ</div>';
+  CRAFT_RECIPES.forEach(function(recipe) {
+    var canCraft = true;
+    var costsHtml = '';
+    recipe.cost.forEach(function(c) {
+      // Руда
+      if (c.oreId) {
+        var have = G.ore[c.oreId] || 0;
+        var ore = ORE_TYPES.find(function(o) { return o.id === c.oreId; });
+        var r = ore ? (RARITIES.find(function(x) { return x.id === ore.rarity; }) || { color: '#888' }) : { color: '#888' };
+        var ok = have >= c.qty;
+        if (!ok) canCraft = false;
+        costsHtml += '<div style="display:flex;align-items:center;gap:4px;font-size:11px;">' +
+          '<img src="' + (ore ? ore.icon : '') + '" style="width:16px;height:16px;image-rendering:pixelated;" onerror="this.style.opacity=0">' +
+          '<span style="color:' + r.color + ';">' + (ore ? ore.name : c.oreId) + '</span>' +
+          '<span style="color:' + (ok ? '#2ecc71' : '#e74c3c') + ';margin-left:2px;">' + have + '/' + c.qty + '</span>' +
+        '</div>';
+      }
+      // Руны как ресурс
+      if (c.runeId) {
+        var haveR = G.runes[c.runeId] || 0;
+        var rt = RUNE_TYPES.find(function(r) { return r.id === c.runeId; });
+        var rtc = rt ? (RARITIES.find(function(x) { return x.id === rt.rarity; }) || { color: '#888' }) : { color: '#888' };
+        var okR = haveR >= c.qty;
+        if (!okR) canCraft = false;
+        costsHtml += '<div style="display:flex;align-items:center;gap:4px;font-size:11px;">' +
+          '<img src="' + (rt ? rt.icon : '') + '" style="width:16px;height:16px;image-rendering:pixelated;" onerror="this.style.opacity=0">' +
+          '<span style="color:' + rtc.color + ';">' + (rt ? rt.name : c.runeId) + '</span>' +
+          '<span style="color:' + (okR ? '#2ecc71' : '#e74c3c') + ';margin-left:2px;">' + haveR + '/' + c.qty + '</span>' +
+        '</div>';
+      }
+    });
+    if (recipe.pixrCost) {
+      var hp = G.pixr || 0;
+      var okp = hp >= recipe.pixrCost;
+      if (!okp) canCraft = false;
+      costsHtml += '<div style="display:flex;align-items:center;gap:4px;font-size:11px;">' +
+        '<img src="pixr.png" style="width:16px;height:16px;image-rendering:pixelated;" onerror="this.style.opacity=0">' +
+        '<span style="color:#ff44cc;">PIXR</span>' +
+        '<span style="color:' + (okp ? '#2ecc71' : '#e74c3c') + ';margin-left:2px;">' + hp + '/' + recipe.pixrCost + '</span>' +
+      '</div>';
+    }
+    var chanceStr = (recipe.chance && recipe.chance < 100) ? ' · <span style="color:#f5c542;font-size:9px;">⚡ ' + recipe.chance + '% шанс</span>' : '';
+    var borderCol = canCraft ? '#2ecc71' : '#1e1e3a';
+    var bgCol     = canCraft ? 'rgba(46,204,113,0.06)' : 'rgba(255,255,255,0.02)';
+    recipesHtml +=
+      '<div style="background:' + bgCol + ';border:1px solid ' + borderCol + ';border-radius:10px;padding:12px;margin-bottom:10px;">' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
+          '<img src="' + recipe.icon + '" style="width:36px;height:36px;image-rendering:pixelated;" onerror="this.replaceWith(document.createTextNode(\'🛡\'))">' +
+          '<div style="flex:1;"><div style="font-size:13px;font-weight:700;color:#ccd;">' + recipe.name + chanceStr + '</div>' +
+          '<div style="font-size:10px;color:#556;margin-top:2px;">' + recipe.desc + '</div></div>' +
+        '</div>' +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">' + costsHtml + '</div>' +
+        '<button onclick="doCraft(\'' + recipe.id + '\')" ' + (canCraft ? '' : 'disabled ') +
+          'style="width:100%;padding:10px;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;' +
+          'cursor:' + (canCraft ? 'pointer' : 'not-allowed') + ';' +
+          'background:' + (canCraft ? 'rgba(46,204,113,0.15)' : 'rgba(255,255,255,0.03)') + ';' +
+          'border:1.5px solid ' + (canCraft ? '#2ecc71' : '#2a2a40') + ';' +
+          'color:' + (canCraft ? '#2ecc71' : '#334') + ';">' +
+          '⚒ СКРАФТИТЬ' +
+        '</button>' +
+      '</div>';
+  });
+
+  body.innerHTML = oreHtml + runeHtml + blessHtml + recipesHtml;
+}
+
+// ── Выполнить крафт ──
+function doCraft(recipeId) {
+  var recipe = CRAFT_RECIPES.find(function(r) { return r.id === recipeId; });
+  if (!recipe) return;
+  if (!G.ore) G.ore = {};
+  if (!G.runes) G.runes = {};
+
+  // Проверка ресурсов
+  for (var i = 0; i < recipe.cost.length; i++) {
+    var c = recipe.cost[i];
+    if (c.oreId) {
+      if ((G.ore[c.oreId] || 0) < c.qty) { _showCraftMsg(false, 'Недостаточно руды!'); return; }
+    }
+    if (c.runeId) {
+      if ((G.runes[c.runeId] || 0) < c.qty) { _showCraftMsg(false, 'Недостаточно рун!'); return; }
+    }
+  }
+  if (recipe.pixrCost && (G.pixr || 0) < recipe.pixrCost) {
+    _showCraftMsg(false, 'Недостаточно PIXR!'); return;
+  }
+
+  // Списываем ресурсы
+  recipe.cost.forEach(function(c) {
+    if (c.oreId)  G.ore[c.oreId]    = (G.ore[c.oreId] || 0) - c.qty;
+    if (c.runeId) G.runes[c.runeId] = (G.runes[c.runeId] || 0) - c.qty;
+  });
+  if (recipe.pixrCost) G.pixr = (G.pixr || 0) - recipe.pixrCost;
+
+  // Шанс успеха
+  var chance = recipe.chance !== undefined ? recipe.chance : 100;
+  var success = Math.random() * 100 < chance;
+
+  if (!success) {
+    // Провал — ресурсы сгорели
+    updateHUD();
+    if (typeof saveNow === 'function') saveNow();
+    renderCraft();
+    _showCraftMsg(false, 'Провал! Ресурсы сгорели.');
+    return;
+  }
+
+  // Успех
+  if (recipe.result.type === 'bless_stone') {
+    G.blessStones = (G.blessStones || 0) + recipe.result.qty;
+  } else if (recipe.result.type === 'rune') {
+    G.runes[recipe.result.runeId] = (G.runes[recipe.result.runeId] || 0) + recipe.result.qty;
+  }
+  updateHUD();
+  if (typeof saveNow === 'function') saveNow();
+  renderCraft();
+  _showCraftMsg(true, recipe.name + ' ×' + recipe.result.qty + ' готово!');
+}
+
+function _showCraftMsg(ok, msg) {
+  var el = document.createElement('div');
+  el.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+    'background:#13132a;border:2px solid ' + (ok ? '#2ecc71' : '#e74c3c') + ';' +
+    'border-radius:12px;padding:18px 28px;text-align:center;z-index:9999;' +
+    'color:' + (ok ? '#2ecc71' : '#e74c3c') + ';font-size:14px;font-weight:700;font-family:inherit;pointer-events:none;';
+  el.textContent = (ok ? '✨ ' : '❌ ') + msg;
+  document.body.appendChild(el);
+  setTimeout(function() { el.remove(); }, 2000);
+}
+
+// ═══════════════════════════════
+//  ВКЛАДКА РУНЫ
+// ═══════════════════════════════
+var _runeSelectedItem = null; // id предмета выбранного для вставки
+
+function renderRune() {
+  var body = document.getElementById('runeBody');
+  if (!body) return;
+  if (!G.runes) G.runes = {};
+
+  // Счётчик рун
+  var runesHtml = '<div style="margin-bottom:14px;">' +
+    '<div style="font-size:10px;color:#556;letter-spacing:1px;margin-bottom:8px;">МОИ РУНЫ</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+  var anyRune = RUNE_TYPES.some(function(rt) { return (G.runes[rt.id] || 0) > 0; });
+  if (anyRune) {
+    RUNE_TYPES.forEach(function(rt) {
+      var qty = G.runes[rt.id] || 0;
+      if (qty <= 0) return;
+      var rc = RARITIES.find(function(x) { return x.id === rt.rarity; }) || { color: '#888' };
+      runesHtml += '<div style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.04);border:1px solid ' + rc.color + '55;border-radius:8px;padding:6px 10px;">' +
+        '<img src="' + rt.icon + '" style="width:22px;height:22px;image-rendering:pixelated;" onerror="this.style.opacity=0.3">' +
+        '<div><div style="font-size:9px;color:' + rc.color + ';">' + rt.name + '</div>' +
+        '<div style="font-size:13px;font-weight:700;color:#ccd;">×' + qty + '</div></div>' +
+      '</div>';
+    });
+  } else {
+    runesHtml += '<div style="color:#334;font-size:11px;padding:6px 0;">Рун нет — скрафти в КРАФТ</div>';
+  }
+  runesHtml += '</div></div>';
+
+  // Слоты экипировки
+  var slotsHtml = '<div style="font-size:10px;color:#556;letter-spacing:1px;margin-bottom:8px;">ЭКИПИРОВКА — выбери предмет для вставки</div>';
+  slotsHtml += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;">';
+  ['weapon','body','legs','gloves','boots','helmet','ring','belt'].forEach(function(slot) {
+    var item = G.equipped[slot];
+    if (!item) {
+      slotsHtml += '<div style="border-radius:8px;border:1px dashed #1e1e3a;padding:10px 8px;display:flex;align-items:center;gap:8px;opacity:0.35;">' +
+        '<img src="images/' + ({ weapon:'wwc', body:'ac', legs:'lc', gloves:'pc', boots:'bc', helmet:'hc', ring:'ringc', belt:'beltc' }[slot] || 'ac') + '.png" style="width:28px;height:28px;image-rendering:pixelated;opacity:0.3;">' +
+        '<div style="font-size:11px;color:#334;">' + ({ weapon:'Оружие', body:'Тело', legs:'Штаны', gloves:'Перчи', boots:'Боты', helmet:'Шлем', ring:'Кольцо', belt:'Пояс' }[slot]) + '</div>' +
+      '</div>';
+      return;
+    }
+    var r = RARITIES.find(function(x) { return x.id === item.rarity; }) || { color: '#888' };
+    var hasRune = !!item.rune;
+    var isSelected = _runeSelectedItem === item.id;
+    var runeOverlay = hasRune ? ('<img src="' + (RUNE_TYPES.find(function(rt) { return rt.id === item.rune.type; }) || { icon: '' }).icon + '" style="width:14px;height:14px;image-rendering:pixelated;flex-shrink:0;">') : '';
+
+    slotsHtml += '<div onclick="runeSelectItem(' + item.id + ')" style="' +
+      'border-radius:8px;border:1.5px solid ' + (isSelected ? '#f5c542' : (hasRune ? '#a78bfa' : r.color + '88')) + ';' +
+      'background:' + (isSelected ? 'rgba(245,197,66,0.1)' : 'rgba(255,255,255,0.03)') + ';' +
+      'padding:8px;display:flex;align-items:center;gap:8px;cursor:pointer;transition:background .15s;">' +
+      '<div style="position:relative;flex-shrink:0;">' +
+        '<img src="' + item.icon + '" style="width:32px;height:32px;object-fit:contain;image-rendering:pixelated;">' +
+        (hasRune ? '<div style="position:absolute;bottom:-2px;right:-2px;">' + runeOverlay + '</div>' : '') +
+      '</div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-size:11px;color:' + r.color + ';font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + item.name + (item.refine ? ' +' + item.refine : '') + '</div>' +
+        '<div style="font-size:9px;color:' + (hasRune ? '#a78bfa' : '#556') + ';">' + (hasRune ? 'Руна вставлена' : 'Слот свободен') + '</div>' +
+      '</div>' +
+    '</div>';
+  });
+  slotsHtml += '</div>';
+
+  // Панель вставки (если предмет выбран)
+  var insertHtml = '';
+  if (_runeSelectedItem) {
+    var selItem = null;
+    Object.values(G.equipped).forEach(function(it) { if (it && it.id === _runeSelectedItem) selItem = it; });
+    if (selItem) {
+      var selR = RARITIES.find(function(x) { return x.id === selItem.rarity; }) || { color: '#888' };
+      insertHtml = '<div style="border:1.5px solid #f5c542;border-radius:10px;padding:12px;background:rgba(245,197,66,0.05);">' +
+        '<div style="font-size:10px;color:#f5c542;letter-spacing:1px;margin-bottom:10px;">ВЫБРАТЬ РУНУ ДЛЯ ВСТАВКИ</div>';
+      if (selItem.rune) {
+        // Руна уже вставлена
+        var existRt = RUNE_TYPES.find(function(r) { return r.id === selItem.rune.type; });
+        var existRc = existRt ? (RARITIES.find(function(x) { return x.id === existRt.rarity; }) || { color: '#888' }) : { color: '#888' };
+        var runeStatsTxt = '';
+        if (selItem.rune.atk) runeStatsTxt += '+' + selItem.rune.atk + ' ATK ';
+        if (selItem.rune.def) runeStatsTxt += '+' + selItem.rune.def + ' DEF ';
+        if (selItem.rune.hp)  runeStatsTxt += '+' + selItem.rune.hp + ' HP';
+        insertHtml += '<div style="text-align:center;padding:12px;color:#a78bfa;font-size:12px;">' +
+          '<img src="' + (existRt ? existRt.icon : '') + '" style="width:28px;height:28px;image-rendering:pixelated;vertical-align:middle;margin-right:6px;">' +
+          (existRt ? existRt.name : 'Руна') + '<br><span style="font-size:10px;color:#778;">' + runeStatsTxt.trim() + '</span><br>' +
+          '<span style="font-size:10px;color:#445;margin-top:4px;display:block;">Руна вставлена — нельзя снять</span>' +
+        '</div>';
+      } else {
+        // Показываем доступные руны
+        var cost = RUNE_INSERT_COST[selItem.rarity] || 1;
+        var availRunes = RUNE_TYPES.filter(function(rt) { return (G.runes[rt.id] || 0) > 0; });
+        if (availRunes.length === 0) {
+          insertHtml += '<div style="text-align:center;padding:12px;color:#445;font-size:11px;">Нет рун для вставки</div>';
+        } else {
+          insertHtml += '<div style="font-size:10px;color:#556;margin-bottom:8px;">Стоимость вставки: <span style="color:#ff44cc;font-weight:700;">' + cost + ' PIXR</span></div>';
+          insertHtml += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">';
+          availRunes.forEach(function(rt) {
+            var qty = G.runes[rt.id] || 0;
+            var rc = RARITIES.find(function(x) { return x.id === rt.rarity; }) || { color: '#888' };
+            var canInsert = (G.pixr || 0) >= cost && qty > 0;
+            // Превью статов
+            var statPrev = '';
+            Object.keys(rt.stats).forEach(function(s) {
+              statPrev += '+' + rt.stats[s][0] + '-' + rt.stats[s][1] + ' ' + s.toUpperCase() + ' ';
+            });
+            insertHtml += '<div onclick="' + (canInsert ? 'doInsertRune(' + selItem.id + ',\'' + rt.id + '\')' : '') + '" style="' +
+              'border-radius:8px;border:1.5px solid ' + (canInsert ? rc.color : '#2a2a3a') + ';' +
+              'background:' + (canInsert ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)') + ';' +
+              'padding:8px;cursor:' + (canInsert ? 'pointer' : 'not-allowed') + ';' +
+              'display:flex;flex-direction:column;align-items:center;gap:4px;' +
+              'opacity:' + (canInsert ? '1' : '0.4') + ';">' +
+              '<img src="' + rt.icon + '" style="width:28px;height:28px;image-rendering:pixelated;">' +
+              '<div style="font-size:10px;color:' + rc.color + ';font-weight:700;text-align:center;">' + rt.name + '</div>' +
+              '<div style="font-size:9px;color:#667;text-align:center;">' + statPrev.trim() + '</div>' +
+              '<div style="font-size:9px;color:#aaa;">×' + qty + ' в наличии</div>' +
+            '</div>';
+          });
+          insertHtml += '</div>';
+        }
+      }
+      insertHtml += '</div>';
+    }
+  }
+
+  body.innerHTML = runesHtml + slotsHtml + insertHtml;
+}
+
+function runeSelectItem(itemId) {
+  _runeSelectedItem = (_runeSelectedItem === itemId) ? null : itemId;
+  renderRune();
+}
+
+function doInsertRune(itemId, runeTypeId) {
+  if (!G.runes) G.runes = {};
+  var rt = RUNE_TYPES.find(function(r) { return r.id === runeTypeId; });
+  if (!rt) return;
+  var selItem = null;
+  Object.values(G.equipped).forEach(function(it) { if (it && it.id === itemId) selItem = it; });
+  if (!selItem) return;
+  if (selItem.rune) { _showCraftMsg(false, 'Уже есть руна!'); return; }
+  var cost = RUNE_INSERT_COST[selItem.rarity] || 1;
+  if ((G.pixr || 0) < cost) { _showCraftMsg(false, 'Недостаточно PIXR! Нужно ' + cost); return; }
+  if ((G.runes[runeTypeId] || 0) <= 0) { _showCraftMsg(false, 'Нет руны!'); return; }
+
+  // Списываем
+  G.pixr = (G.pixr || 0) - cost;
+  G.runes[runeTypeId] = (G.runes[runeTypeId] || 0) - 1;
+
+  // Генерируем статы руны
+  var runeStats = {};
+  Object.keys(rt.stats).forEach(function(s) {
+    var min = rt.stats[s][0], max = rt.stats[s][1];
+    runeStats[s] = min + Math.floor(Math.random() * (max - min + 1));
+  });
+
+  selItem.rune = Object.assign({ type: runeTypeId }, runeStats);
+
+  _runeSelectedItem = null;
+  updateHUD();
+  if (typeof saveNow === 'function') saveNow();
+  renderRune();
+
+  var statTxt = Object.keys(runeStats).map(function(s) { return '+' + runeStats[s] + ' ' + s.toUpperCase(); }).join(', ');
+  _showCraftMsg(true, rt.name + ' вставлена! ' + statTxt);
+}

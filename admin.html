@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Админ-панель PIXEL RPG</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Courier New', monospace;
+  background: #0a0a1a;
+  color: #ccc;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── ЛОГИН ── */
+#loginScreen {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, #0a0a2a, #050510);
+  z-index: 1000;
+}
+.login-box {
+  width: 300px;
+  padding: 32px 24px;
+  background: rgba(10,10,30,0.95);
+  border: 1px solid #2a2a5a;
+  border-radius: 16px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(100,50,200,0.15);
+}
+.login-logo { font-size: 14px; color: #f5c542; font-weight: bold; letter-spacing: 2px; margin-bottom: 4px; }
+.login-title { font-size: 20px; color: #aaa; margin-bottom: 20px; }
+.login-error { color: #e74c3c; font-size: 12px; min-height: 20px; margin-bottom: 8px; }
+.login-input {
+  width: 100%; padding: 12px; margin-bottom: 10px;
+  background: #0d0d22; border: 1px solid #2a2a5a; border-radius: 8px;
+  color: #fff; font-size: 14px; font-family: 'Courier New', monospace;
+}
+.login-input:focus { outline: none; border-color: #f5c542; }
+.login-btn {
+  width: 100%; padding: 12px;
+  background: linear-gradient(90deg, #4a2a8a, #7a4ad0);
+  border: none; border-radius: 8px;
+  color: #fff; font-size: 16px; font-weight: bold;
+  cursor: pointer; font-family: 'Courier New', monospace;
+}
+.login-btn:active { transform: scale(0.97); opacity: 0.8; }
+.login-version { font-size: 10px; color: #445; margin-top: 16px; }
+
+/* ── ХЕДЕР ── */
+.admin-header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(5,5,20,0.98);
+  border-bottom: 1px solid #2a2a5a;
+}
+.admin-title { font-size: 14px; color: #f5c542; font-weight: bold; letter-spacing: 1px; }
+.admin-user { font-size: 11px; color: #778; }
+.admin-logout {
+  background: none; border: none; color: #e74c3c;
+  font-size: 18px; cursor: pointer; padding: 4px 8px;
+}
+
+/* ── ВКЛАДКИ ── */
+.admin-tabs {
+  position: fixed; top: 52px; left: 0; right: 0; z-index: 99;
+  display: flex;
+  background: rgba(5,5,20,0.95);
+  border-bottom: 1px solid #1a1a35;
+  overflow-x: auto;
+}
+.tab-btn {
+  flex: 1; padding: 12px 0; min-width: 44px;
+  background: none; border: none;
+  color: #556; font-size: 20px;
+  cursor: pointer; transition: color .2s;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.tab-btn.active { color: #f5c542; border-bottom-color: #f5c542; }
+.tab-btn:active { transform: scale(0.9); }
+.tab-label { font-size: 9px; display: block; color: #445; margin-top: 2px; }
+.tab-btn.active .tab-label { color: #f5c542; }
+
+/* ── КОНТЕНТ ── */
+.admin-content {
+  position: fixed; top: 96px; left: 0; right: 0; bottom: 0;
+  overflow-y: auto;
+  padding: 12px 12px 80px;
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ── СТАТИСТИКА ── */
+.stats-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 12px;
+}
+.stat-card {
+  padding: 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid #1a1a35;
+  border-radius: 10px;
+}
+.stat-card.full { grid-column: 1 / -1; }
+.stat-num { font-size: 28px; font-weight: bold; color: #f5c542; }
+.stat-label { font-size: 10px; color: #778; margin-top: 2px; }
+
+/* ── ПОИСК ── */
+.search-bar {
+  display: flex; gap: 8px; margin-bottom: 12px;
+}
+.search-input {
+  flex: 1; padding: 10px 12px;
+  background: #0d0d22; border: 1px solid #2a2a5a; border-radius: 8px;
+  color: #fff; font-size: 13px; font-family: 'Courier New', monospace;
+}
+.search-input:focus { outline: none; border-color: #f5c542; }
+.search-btn {
+  padding: 10px 16px;
+  background: #2a2a5a; border: none; border-radius: 8px;
+  color: #fff; font-size: 16px; cursor: pointer;
+}
+.search-btn:active { opacity: 0.7; }
+
+/* ── ПОЛЬЗОВАТЕЛИ ── */
+.users-list { margin-bottom: 12px; }
+.user-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid #1a1a35;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background .15s;
+}
+.user-row:active { background: rgba(255,255,255,0.07); }
+.user-info { flex: 1; min-width: 0; }
+.user-name { font-size: 13px; color: #ddd; }
+.user-id { font-size: 9px; color: #556; }
+.user-stats { display: flex; gap: 10px; font-size: 11px; color: #778; }
+.user-stats span { color: #f5c542; }
+
+.pagination {
+  display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
+}
+.pagination button {
+  padding: 6px 12px;
+  background: #1a1a35; border: none; border-radius: 6px;
+  color: #778; font-size: 12px; cursor: pointer;
+  font-family: 'Courier New', monospace;
+}
+.pagination button.active { background: #3a3a7a; color: #f5c542; }
+.pagination button:active { opacity: 0.7; }
+
+/* ── РАССЫЛКА ── */
+.broadcast-input {
+  width: 100%; height: 120px;
+  padding: 12px;
+  background: #0d0d22; border: 1px solid #2a2a5a; border-radius: 8px;
+  color: #fff; font-size: 13px; font-family: 'Courier New', monospace;
+  resize: vertical;
+}
+.broadcast-input:focus { outline: none; border-color: #f5c542; }
+.broadcast-target {
+  width: 100%; padding: 10px; margin: 10px 0;
+  background: #0d0d22; border: 1px solid #2a2a5a; border-radius: 8px;
+  color: #fff; font-size: 13px; font-family: 'Courier New', monospace;
+}
+.broadcast-btn {
+  width: 100%; padding: 12px;
+  background: linear-gradient(90deg, #2a5a2a, #4a8a4a);
+  border: none; border-radius: 8px;
+  color: #fff; font-size: 14px; font-weight: bold;
+  cursor: pointer; font-family: 'Courier New', monospace;
+}
+.broadcast-btn:active { opacity: 0.8; }
+
+/* ── ЛОГИ ── */
+.log-row {
+  padding: 8px 10px;
+  border-bottom: 1px solid #0a0a1a;
+  font-size: 11px;
+}
+.log-time { color: #556; }
+.log-admin { color: #f5c542; font-weight: bold; }
+.log-action { color: #4cf; }
+.log-target { color: #a78bfa; }
+
+/* ── МОДАЛКА ── */
+.modal {
+  position: fixed; inset: 0; z-index: 200;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.8);
+}
+.modal.show { display: flex; }
+.modal-content {
+  width: 92%; max-width: 400px; max-height: 85vh;
+  background: #0e0e22; border: 1px solid #2a2a5a; border-radius: 16px;
+  overflow: hidden;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1a1a35;
+}
+.modal-title { font-size: 15px; font-weight: bold; color: #f5c542; }
+.modal-close {
+  background: none; border: none; color: #666;
+  font-size: 20px; cursor: pointer; padding: 0 4px;
+}
+.modal-body {
+  padding: 16px;
+  overflow-y: auto; max-height: 70vh;
+}
+.modal-body .field {
+  display: flex; justify-content: space-between;
+  padding: 6px 0; border-bottom: 1px solid #0a0a1a;
+  font-size: 12px;
+}
+.modal-body .field-label { color: #778; }
+.modal-body .field-value { color: #ddd; }
+.modal-body .field-value.gold { color: #f5c542; }
+.modal-body .field-value.pixr { color: #ff44cc; }
+.modal-body .field-value.gram { color: #40d0ff; }
+
+.edit-input {
+  width: 80px; padding: 4px 8px;
+  background: #0d0d22; border: 1px solid #2a2a5a; border-radius: 4px;
+  color: #fff; font-size: 13px; font-family: 'Courier New', monospace;
+}
+.edit-btn {
+  padding: 4px 12px;
+  background: #2a2a5a; border: none; border-radius: 4px;
+  color: #f5c542; font-size: 11px; cursor: pointer;
+  font-family: 'Courier New', monospace;
+}
+.edit-btn:active { opacity: 0.7; }
+
+/* ── РЕЙТИНГ ВРЕМЕНИ ── */
+.pt-rank-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid #1a1a35;
+  border-radius: 8px;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+.pt-rank-num { color: #556; width: 22px; flex-shrink: 0; text-align: right; font-size: 11px; }
+.pt-rank-num.gold   { color: #f5c542; font-weight: bold; }
+.pt-rank-num.silver { color: #aaa;    font-weight: bold; }
+.pt-rank-num.bronze { color: #cd7f32; font-weight: bold; }
+.pt-info { flex: 1; min-width: 0; }
+.pt-name  { color: #ddd; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-meta  { color: #556; font-size: 10px; margin-top: 1px; }
+.pt-time  { color: #7af7a7; font-size: 13px; font-weight: bold; flex-shrink: 0; text-align: right; }
+.pt-today { color: #7ab8ff; font-size: 10px; text-align: right; }
+.pt-sort-btns { display: flex; gap: 6px; margin-bottom: 10px; }
+.pt-sort-btn {
+  padding: 6px 12px; font-size: 11px;
+  background: #1a1a35; border: 1px solid #2a2a5a; border-radius: 6px;
+  color: #778; cursor: pointer; font-family: 'Courier New', monospace;
+}
+.pt-sort-btn.active { background: #2a2a5a; color: #f5c542; border-color: #f5c542; }
+.pt-sort-btn:active { opacity: 0.7; }
+.pt-summary {
+  display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.pt-summary-card {
+  flex: 1; min-width: 100px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid #1a1a35; border-radius: 8px;
+  text-align: center;
+}
+.pt-summary-num   { font-size: 18px; font-weight: bold; color: #7af7a7; }
+.pt-summary-label { font-size: 9px; color: #556; margin-top: 2px; }
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a5a; border-radius: 2px; }
+
+/* ── АДАПТИВ ── */
+@media (min-width: 600px) {
+  .stats-grid { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .admin-content { padding: 16px 24px 80px; }
+  .modal-content { max-width: 500px; }
+}
+@media (max-width: 480px) {
+  .tab-btn { font-size: 16px; padding: 10px 0; min-width: 36px; }
+  .tab-label { font-size: 7px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════
+     ЭКРАН ВХОДА
+     ════════════════════════════════ -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">⚙️ PIXEL RPG</div>
+    <div class="login-title">Админ-панель</div>
+    <div class="login-error" id="loginError"></div>
+    <input class="login-input" id="loginInput" type="text" placeholder="Логин" autocomplete="username">
+    <input class="login-input" id="passwordInput" type="password" placeholder="Пароль" autocomplete="current-password">
+    <button class="login-btn" id="loginBtn">Войти</button>
+    <div class="login-version">v2.0</div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════
+     АДМИН-ПАНЕЛЬ
+     ════════════════════════════════ -->
+<div id="adminPanel" style="display:none;">
+
+  <!-- Хедер -->
+  <div class="admin-header">
+    <div class="admin-title">⚙️ PIXEL RPG</div>
+    <div class="admin-user" id="adminUser">admin</div>
+    <button class="admin-logout" onclick="logout()">🚪</button>
+  </div>
+
+  <!-- Вкладки -->
+  <div class="admin-tabs">
+    <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">
+      📊<span class="tab-label">Стат</span>
+    </button>
+    <button class="tab-btn" data-tab="users" onclick="switchTab('users')">
+      👥<span class="tab-label">Игроки</span>
+    </button>
+    <button class="tab-btn" data-tab="economy" onclick="switchTab('economy')">
+      💰<span class="tab-label">Эконом</span>
+    </button>
+    <button class="tab-btn" data-tab="broadcast" onclick="switchTab('broadcast')">
+      📨<span class="tab-label">Рассылка</span>
+    </button>
+    <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">
+      📋<span class="tab-label">Логи</span>
+    </button>
+    <button class="tab-btn" data-tab="tasks" onclick="switchTab('tasks')">
+      ✅<span class="tab-label">Задания</span>
+    </button>
+    <button class="tab-btn" data-tab="playtime" onclick="switchTab('playtime')">
+      ⏱<span class="tab-label">Время</span>
+    </button>
+  </div>
+
+  <!-- Контент -->
+  <div class="admin-content">
+
+    <!-- 📊 ДАШБОРД -->
+    <div class="tab-content active" id="tab-dashboard">
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card"><div class="stat-num" id="statUsers">0</div><div class="stat-label">Игроков</div></div>
+        <div class="stat-card"><div class="stat-num" id="statActive">0</div><div class="stat-label">За 24ч</div></div>
+        <div class="stat-card"><div class="stat-num" id="statOnline">0</div><div class="stat-label">Онлайн (5м)</div></div>
+        <div class="stat-card"><div class="stat-num" id="statWithChar">0</div><div class="stat-label">С персонажем</div></div>
+      </div>
+      <div class="stat-card full">
+        <div class="stat-label">Топ игроков по CP</div>
+        <div id="topCP"></div>
+      </div>
+      <div class="stat-card full">
+        <div class="stat-label">Этажи</div>
+        <div id="floorsStats"></div>
+      </div>
+      <div class="stat-card full" style="border-color:#3a1a1a;">
+        <div class="stat-label" style="color:#e74c3c;font-weight:bold;font-size:13px;margin-bottom:10px;">⚠️ ОПАСНАЯ ЗОНА</div>
+        <button onclick="massResetProgress()" style="width:100%;padding:12px;background:linear-gradient(90deg,#5a1a1a,#8a2a2a);border:1px solid #c0392b;border-radius:8px;color:#ff6b6b;font-size:14px;font-weight:bold;cursor:pointer;font-family:'Courier New',monospace;">
+          🔄 Сбросить прогресс ВСЕХ игроков
+        </button>
+        <div style="font-size:9px;color:#556;margin-top:6px;text-align:center;">Удалит персонажей, инвентарь, валюту у всех. Рефералы сохранятся, награды за них сбросятся для повторного получения.</div>
+        <div id="massResetResult" style="font-size:12px;min-height:18px;margin-top:8px;text-align:center;"></div>
+      </div>
+    </div>
+
+    <!-- 👥 ПОЛЬЗОВАТЕЛИ -->
+    <div class="tab-content" id="tab-users">
+      <div class="search-bar">
+        <input class="search-input" id="userSearch" placeholder="Поиск по ID или имени..." oninput="loadUsers(1)">
+        <button class="search-btn" onclick="loadUsers(1)">🔍</button>
+      </div>
+      <div class="users-list" id="usersList"></div>
+      <div class="pagination" id="usersPagination"></div>
+    </div>
+
+    <!-- 💰 ЭКОНОМИКА -->
+    <div class="tab-content" id="tab-economy">
+      <div class="stat-card full">
+        <div class="stat-label">Топ по золоту</div>
+        <div id="topGold"></div>
+      </div>
+      <div class="stat-card full">
+        <div class="stat-label">Топ по PIXR</div>
+        <div id="topPixr"></div>
+      </div>
+      <div class="stat-card full">
+        <div class="stat-label">Топ по GRAM</div>
+        <div id="topGram"></div>
+      </div>
+    </div>
+
+    <!-- 📨 РАССЫЛКА -->
+    <div class="tab-content" id="tab-broadcast">
+      <div class="stat-card full">
+        <div class="stat-label">Рассылка сообщения</div>
+        <textarea class="broadcast-input" id="broadcastMessage" placeholder="Введите сообщение для всех игроков..."></textarea>
+        <select class="broadcast-target" id="broadcastTarget">
+          <option value="all">Всем игрокам</option>
+          <option value="active">Активным (24ч)</option>
+          <option value="premium">Премиум</option>
+        </select>
+        <button class="broadcast-btn" onclick="sendBroadcast()">📨 Отправить</button>
+        <div id="broadcastResult"></div>
+      </div>
+    </div>
+
+    <!-- 📋 ЛОГИ -->
+    <div class="tab-content" id="tab-logs">
+      <div class="stat-card full">
+        <div class="stat-label">Последние действия</div>
+        <div id="logsList"></div>
+      </div>
+    </div>
+
+    <!-- ✅ ЗАДАНИЯ (управление) -->
+    <div class="tab-content" id="tab-tasks">
+      <div class="stat-card full">
+        <div class="stat-label" style="font-size:14px;color:#f5c542;margin-bottom:12px;">📋 Управление специальными заданиями</div>
+
+        <!-- ФОРМА СОЗДАНИЯ -->
+        <div style="margin-bottom:16px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid #2a2a5a;border-radius:10px;">
+          <div style="font-size:11px;color:#778;margin-bottom:8px;">➕ Создать новое задание</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <input id="taskTitle" placeholder="Название" class="search-input" style="grid-column:1/-1;">
+            <input id="taskDesc" placeholder="Описание" class="search-input" style="grid-column:1/-1;">
+            <input id="taskLink" placeholder="Ссылка (https://t.me/...)" class="search-input">
+            <input id="taskLinkText" placeholder="Текст кнопки" class="search-input" value="Перейти">
+            <select id="taskRewardType" class="search-input">
+              <option value="gold">💰 Золото</option>
+              <option value="pixr">💎 PIXR</option>
+              <option value="potions">🧪 Зелья</option>
+              <option value="gram">⭐ GRAM</option>
+            </select>
+            <input id="taskRewardAmount" placeholder="Количество" class="search-input" type="number" min="1">
+          </div>
+          <button class="broadcast-btn" onclick="adminCreateTask()" style="margin-top:8px;background:linear-gradient(90deg,#2a5a2a,#4a8a4a);">
+            ➕ Создать задание
+          </button>
+          <div id="taskCreateResult" style="font-size:11px;min-height:18px;margin-top:6px;color:#445;"></div>
+        </div>
+
+        <!-- СПИСОК ЗАДАНИЙ -->
+        <div id="specialTasksList">
+          <div style="color:#445;padding:10px 0;font-size:12px;">Загрузка...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⏱ ВРЕМЯ В ИГРЕ -->
+    <div class="tab-content" id="tab-playtime">
+      <div class="pt-summary" id="ptSummary">
+        <div class="pt-summary-card"><div class="pt-summary-num" id="ptTotalPlayers">—</div><div class="pt-summary-label">Игроков в рейтинге</div></div>
+        <div class="pt-summary-card"><div class="pt-summary-num" id="ptGrandTotal">—</div><div class="pt-summary-label">Всего часов сыграно</div></div>
+        <div class="pt-summary-card"><div class="pt-summary-num" id="ptAvgTime">—</div><div class="pt-summary-label">Среднее на игрока</div></div>
+      </div>
+      <div class="stat-card full" style="margin-bottom:10px;">
+        <div class="stat-label" style="margin-bottom:8px;">Сортировка</div>
+        <div class="pt-sort-btns">
+          <button class="pt-sort-btn active" id="ptSortTotal"   onclick="loadPlaytime('total')">⏱ Всего</button>
+          <button class="pt-sort-btn"         id="ptSortToday"   onclick="loadPlaytime('today')">📅 Сегодня</button>
+          <button class="pt-sort-btn"         id="ptSortSessions" onclick="loadPlaytime('sessions')">🔄 Сессий</button>
+        </div>
+        <div id="ptList">
+          <div style="color:#445;padding:20px 0;text-align:center;font-size:12px;">Загрузка...</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════════
+       МОДАЛКА ПОЛЬЗОВАТЕЛЯ
+       ════════════════════════════════ -->
+  <div class="modal" id="userModal" onclick="closeModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <span class="modal-title" id="modalTitle">Пользователь</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  var API = window.location.origin;
+  var SESSION = null;
+  var currentPage = 1;
+  var currentUserTgId = null;
+
+  // ═══════════════════════════════
+  //  АВТОРИЗАЦИЯ
+  // ═══════════════════════════════
+
+  function login() {
+    var loginEl = document.getElementById('loginInput');
+    var passwordEl = document.getElementById('passwordInput');
+    var errorEl = document.getElementById('loginError');
+    
+    var login = loginEl.value.trim();
+    var password = passwordEl.value.trim();
+    
+    if (!login || !password) {
+      errorEl.textContent = 'Введите логин и пароль';
+      return;
+    }
+    
+    errorEl.textContent = 'Загрузка...';
+    
+    fetch(API + '/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login, password })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (!r.ok) {
+        errorEl.textContent = 'Неверный логин или пароль';
+        return;
+      }
+      
+      SESSION = r.session;
+      localStorage.setItem('adminSession', SESSION);
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('adminPanel').style.display = 'block';
+      document.getElementById('adminUser').textContent = r.login;
+      
+      loadDashboard();
+    })
+    .catch(function() {
+      errorEl.textContent = 'Ошибка соединения';
+    });
+  }
+
+  function logout() {
+    if (!SESSION) return;
+    fetch(API + '/admin/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: SESSION })
+    });
+    SESSION = null;
+    localStorage.removeItem('adminSession');
+    document.getElementById('adminPanel').style.display = 'none';
+    document.getElementById('loginScreen').style.display = 'flex';
+  }
+
+  window.logout = logout;
+
+  // ── Проверка сессии при загрузке ──
+  function checkSession() {
+    var saved = localStorage.getItem('adminSession');
+    if (saved) {
+      SESSION = saved;
+      fetch(API + '/admin/check?session=' + SESSION)
+        .then(function(r) { return r.json(); })
+        .then(function(r) {
+          if (r.ok) {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('adminPanel').style.display = 'block';
+            document.getElementById('adminUser').textContent = r.login;
+            loadDashboard();
+          } else {
+            localStorage.removeItem('adminSession');
+            SESSION = null;
+          }
+        });
+    }
+  }
+
+  // ── Вход по Enter ──
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && document.getElementById('loginScreen').style.display !== 'none') {
+      login();
+    }
+  });
+
+  document.getElementById('loginBtn').addEventListener('click', login);
+
+  // ═══════════════════════════════
+  //  ВКЛАДКИ
+  // ═══════════════════════════════
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(function(c) {
+      c.classList.toggle('active', c.id === 'tab-' + tab);
+    });
+    
+    if (tab === 'dashboard') loadDashboard();
+    if (tab === 'users') loadUsers(1);
+    if (tab === 'economy') loadEconomy();
+    if (tab === 'logs') loadLogs();
+    if (tab === 'tasks') loadSpecialTasks();
+    if (tab === 'playtime') loadPlaytime('total');
+  }
+
+  window.switchTab = switchTab;
+
+  // ═══════════════════════════════
+  //  ДАШБОРД
+  // ═══════════════════════════════
+
+  function loadDashboard() {
+    if (!SESSION) return;
+    
+    fetch(API + '/admin/api/stats?session=' + SESSION)
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) return;
+        
+        var s = r.stats;
+        document.getElementById('statUsers').textContent = s.totalUsers || 0;
+        document.getElementById('statActive').textContent = s.active24h || 0;
+        document.getElementById('statOnline').textContent = s.online || 0;
+        document.getElementById('statWithChar').textContent = s.usersWithChar || 0;
+        
+        // Топ CP
+        var topHtml = '';
+        if (s.topCP && s.topCP.length) {
+          s.topCP.forEach(function(u, i) {
+            topHtml += '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #0a0a1a;font-size:12px;">' +
+              '<span>' + (i+1) + '. ' + (u.firstName || u.username || 'Игрок') + '</span>' +
+              '<span style="color:#f5c542;">' + u.cp + ' CP</span>' +
+              '</div>';
+          });
+        } else {
+          topHtml = '<div style="color:#445;padding:10px 0;">Нет данных</div>';
+        }
+        document.getElementById('topCP').innerHTML = topHtml;
+        
+        // Этажи
+        var floorsHtml = '';
+        if (s.floors && s.floors.length) {
+          s.floors.forEach(function(f) {
+            var pct = ((f.count / s.totalUsers) * 100).toFixed(1);
+            floorsHtml += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-bottom:1px solid #0a0a1a;">' +
+              '<span>Этаж ' + f._id + '</span>' +
+              '<span style="color:#7ab8ff;">' + f.count + ' (' + pct + '%)</span>' +
+              '</div>';
+          });
+        } else {
+          floorsHtml = '<div style="color:#445;padding:10px 0;">Нет данных</div>';
+        }
+        document.getElementById('floorsStats').innerHTML = floorsHtml;
+      });
+  }
+
+  // ═══════════════════════════════
+  //  ПОЛЬЗОВАТЕЛИ
+  // ═══════════════════════════════
+
+  function loadUsers(page) {
+    if (!SESSION) return;
+    currentPage = page || 1;
+    
+    var search = document.getElementById('userSearch').value.trim();
+    var url = API + '/admin/api/users?session=' + SESSION + '&page=' + currentPage + '&limit=20';
+    if (search) url += '&search=' + encodeURIComponent(search);
+    
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) return;
+        
+        var list = document.getElementById('usersList');
+        var html = '';
+        
+        r.users.forEach(function(u) {
+          var data = u.data || {};
+          var char = u.charId ? (u.charId === 'fire' ? '🔥' : u.charId === 'light' ? '✨' : '💧') : '❌';
+          html += '<div class="user-row" onclick="openUser(\'' + u.tgId + '\')">' +
+            '<div class="user-info">' +
+            '<div class="user-name">' + (u.firstName || u.username || 'Игрок') + ' ' + char + '</div>' +
+            '<div class="user-id">ID: ' + u.tgId + '</div>' +
+            '</div>' +
+            '<div class="user-stats">' +
+            '<span>Lv.' + u.level + '</span>' +
+            '<span>' + u.cp + ' CP</span>' +
+            '<span>💰' + (data.gold || 0) + '</span>' +
+            '</div>' +
+            '</div>';
+        });
+        
+        if (!r.users.length) {
+          html = '<div style="text-align:center;color:#445;padding:30px 0;">Пользователей не найдено</div>';
+        }
+        
+        list.innerHTML = html;
+        
+        // Пагинация
+        var pag = document.getElementById('usersPagination');
+        var pagHtml = '';
+        for (var i = 1; i <= r.pages && i <= 10; i++) {
+          pagHtml += '<button class="' + (i === r.page ? 'active' : '') + '" onclick="loadUsers(' + i + ')">' + i + '</button>';
+        }
+        pag.innerHTML = pagHtml;
+      });
+  }
+
+  window.loadUsers = loadUsers;
+
+  // ═══════════════════════════════
+  //  ПОЛЬЗОВАТЕЛЬ (модалка)
+  // ═══════════════════════════════
+
+  function openUser(tgId) {
+    if (!SESSION) return;
+    currentUserTgId = tgId;
+    
+    fetch(API + '/admin/api/user/' + tgId + '?session=' + SESSION)
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) return;
+        
+        var u = r.user;
+        var data = u.data || {};
+        
+        document.getElementById('modalTitle').textContent = '👤 ' + (u.firstName || u.username || 'Игрок');
+        
+        var html = '';
+        html += '<div class="field"><span class="field-label">ID</span><span class="field-value">' + u.tgId + '</span></div>';
+        html += '<div class="field"><span class="field-label">Имя</span><span class="field-value">' + (u.firstName || '—') + '</span></div>';
+        html += '<div class="field"><span class="field-label">Юзернейм</span><span class="field-value">@' + (u.username || '—') + '</span></div>';
+        html += '<div class="field"><span class="field-label">Персонаж</span><span class="field-value">' + (u.charId || 'Не выбран') + '</span></div>';
+        html += '<div class="field"><span class="field-label">Уровень</span><span class="field-value">' + u.level + '</span></div>';
+        html += '<div class="field"><span class="field-label">CP</span><span class="field-value">' + u.cp + '</span></div>';
+        html += '<div class="field"><span class="field-label">Этаж</span><span class="field-value">' + u.floor + '</span></div>';
+        html += '<div class="field"><span class="field-label">Обновлен</span><span class="field-value">' + new Date(u.updatedAt).toLocaleString() + '</span></div>';
+        html += '<div style="margin-top:12px;border-top:1px solid #1a1a35;padding-top:10px;">';
+        html += '<div class="field"><span class="field-label">🪙 Золото</span><span class="field-value gold">' + (data.gold || 0) + '</span></div>';
+        html += '<div class="field"><span class="field-label">💎 PIXR</span><span class="field-value pixr">' + (data.pixr || 0) + '</span></div>';
+        html += '<div class="field"><span class="field-label">⭐ GRAM</span><span class="field-value gram">' + (data.gram || 0) + '</span></div>';
+        html += '<div class="field"><span class="field-label">❤️ HP</span><span class="field-value">' + (data.hp || '—') + '</span></div>';
+        html += '<div class="field"><span class="field-label">💀 Убийств</span><span class="field-value">' + (data.killCount || 0) + '</span></div>';
+        html += '<div class="field"><span class="field-label">🧪 Зелий</span><span class="field-value">' + (data.potions || 0) + '</span></div>';
+        html += '<div class="field"><span class="field-label">📦 Предметов</span><span class="field-value">' + (data.inventory ? data.inventory.length : 0) + '</span></div>';
+        html += '</div>';
+        
+        // === РЕФЕРАЛЫ ===
+        html += '<div style="margin-top:14px;border-top:1px solid #1a1a35;padding-top:12px;">';
+        html += '<div style="font-size:11px;color:#778;margin-bottom:8px;">👥 РЕФЕРАЛЫ</div>';
+        html += '<div id="referralsList" style="font-size:11px;color:#556;">';
+        html += '<span style="color:#445;">Загрузка...</span>';
+        html += '</div></div>';
+        
+        // === ВЫДАЧА ПРЕДМЕТОВ ===        html += '<div style="margin-top:14px;border-top:1px solid #1a1a35;padding-top:12px;">';
+        html += '<div style="font-size:11px;color:#778;margin-bottom:8px;">📦 ВЫДАТЬ ПРЕДМЕТ</div>';
+        html += '<div style="display:flex;flex-direction:column;gap:6px;">';
+        html += '<select id="itemSelect" style="padding:8px;background:#0d0d22;border:1px solid #2a2a5a;border-radius:6px;color:#fff;font-size:12px;font-family:\'Courier New\',monospace;">';
+        html += '<option value="">Загрузка...</option>';
+        html += '</select>';
+        html += '<select id="itemRarity" style="padding:8px;background:#0d0d22;border:1px solid #2a2a5a;border-radius:6px;color:#fff;font-size:12px;font-family:\'Courier New\',monospace;">';
+        html += '<option value="common">Обычный</option>';
+        html += '<option value="uncommon">Необычный</option>';
+        html += '<option value="rare">Редкий</option>';
+        html += '<option value="epic">Эпический</option>';
+        html += '<option value="legend">Легендарный</option>';
+        html += '</select>';
+        html += '<input id="itemLevel" type="number" placeholder="Уровень (1-20)" value="1" style="padding:8px;background:#0d0d22;border:1px solid #2a2a5a;border-radius:6px;color:#fff;font-size:12px;font-family:\'Courier New\',monospace;">';
+        html += '<button onclick="giveItem()" style="padding:8px;background:linear-gradient(90deg,#2a5a2a,#4a8a4a);border:none;border-radius:6px;color:#fff;font-size:12px;cursor:pointer;font-family:\'Courier New\',monospace;">';
+        html += '📦 Выдать предмет';
+        html += '</button>';
+        html += '<div id="giveResult" style="font-size:11px;color:#445;margin-top:4px;"></div>';
+        html += '</div></div>';
+        
+        // === РЕДАКТИРОВАНИЕ БАЛАНСОВ ===
+        html += '<div style="margin-top:14px;border-top:1px solid #1a1a35;padding-top:12px;">';
+        html += '<div style="font-size:11px;color:#778;margin-bottom:8px;">Изменить баланс:</div>';
+        html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+        html += '<input class="edit-input" id="editGold" type="number" placeholder="Золото">';
+        html += '<button class="edit-btn" onclick="updateUser(\'gold\')">💰</button>';
+        html += '<input class="edit-input" id="editPixr" type="number" placeholder="PIXR">';
+        html += '<button class="edit-btn" onclick="updateUser(\'pixr\')">💎</button>';
+        html += '<input class="edit-input" id="editGram" type="number" placeholder="GRAM">';
+        html += '<button class="edit-btn" onclick="updateUser(\'gram\')">⭐</button>';
+        html += '</div>';
+        html += '<div style="margin-top:6px;display:flex;gap:6px;">';
+        html += '<input class="edit-input" id="editLevel" type="number" placeholder="Уровень" style="width:70px;">';
+        html += '<button class="edit-btn" onclick="updateUser(\'level\')">📈</button>';
+        html += '<input class="edit-input" id="editFloor" type="number" placeholder="Этаж" style="width:70px;">';
+        html += '<button class="edit-btn" onclick="updateUser(\'floor\')">🏰</button>';
+        html += '</div></div>';
+
+        // === СБРОС ПРОГРЕССА ===
+        html += '<div style="margin-top:20px;border-top:2px solid #3a1a1a;padding-top:14px;">';
+        html += '<div style="font-size:11px;color:#e74c3c;margin-bottom:8px;font-weight:bold;">⚠️ ОПАСНАЯ ЗОНА</div>';
+        html += '<button onclick="resetUserProgress()" style="width:100%;padding:10px;background:linear-gradient(90deg,#5a1a1a,#8a2a2a);border:1px solid #c0392b;border-radius:8px;color:#ff6b6b;font-size:13px;font-weight:bold;cursor:pointer;font-family:\'Courier New\',monospace;">🔄 Сбросить прогресс</button>';
+        html += '<div style="font-size:9px;color:#556;margin-top:4px;text-align:center;">Удалит персонажа, инвентарь, валюту, прокачку. Рефералы сохранятся.</div>';
+        html += '<div id="resetResult" style="font-size:11px;min-height:16px;margin-top:6px;text-align:center;"></div>';
+        html += '</div>';
+
+        document.getElementById('modalBody').innerHTML = html;
+        document.getElementById('userModal').classList.add('show');
+        
+        // Загружаем рефералов
+        loadReferrals(tgId);
+        // Загружаем список предметов
+        loadItemsList();
+      });
+  }
+
+  window.openUser = openUser;
+
+  function closeModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('userModal').classList.remove('show');
+  }
+
+  window.closeModal = closeModal;
+
+  // ── ЗАГРУЗКА РЕФЕРАЛОВ ──
+  function loadReferrals(tgId) {
+    if (!SESSION) return;
+    
+    fetch(API + '/admin/api/user/' + tgId + '/referrals?session=' + SESSION)
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        var list = document.getElementById('referralsList');
+        if (!r.ok || !r.referrals || r.referrals.length === 0) {
+          list.innerHTML = '<span style="color:#445;">Нет рефералов</span>';
+          return;
+        }
+        
+        var html = '';
+        r.referrals.forEach(function(ref) {
+          html += '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #0a0a1a;font-size:10px;">' +
+            '<span style="color:#ddd;">' + ref.username + '</span>' +
+            '<span style="color:#f5c542;">Lv.' + ref.level + '</span>' +
+            '<span style="color:#7ab8ff;">' + ref.cp + ' CP</span>' +
+            '</div>';
+        });
+        list.innerHTML = html;
+      })
+      .catch(function() {
+        document.getElementById('referralsList').innerHTML = '<span style="color:#e74c3c;">Ошибка загрузки</span>';
+      });
+  }
+
+  // ── ЗАГРУЗКА СПИСКА ПРЕДМЕТОВ ──
+  function loadItemsList() {
+    if (!SESSION) return;
+    
+    fetch(API + '/admin/api/items/list?session=' + SESSION)
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        var select = document.getElementById('itemSelect');
+        if (!r.ok || !r.items) {
+          select.innerHTML = '<option value="">Нет предметов</option>';
+          return;
+        }
+        
+        var html = '<option value="">Выберите предмет...</option>';
+        r.items.forEach(function(item) {
+          var label = item.name + ' (' + item.slot + ')';
+          if (item.forClass) label += ' [' + item.classLabel + ']';
+          html += '<option value="' + JSON.stringify(item).replace(/"/g, '&quot;') + '">' + label + '</option>';
+        });
+        select.innerHTML = html;
+      });
+  }
+
+  // ── ВЫДАЧА ПРЕДМЕТА ──
+  function giveItem() {
+    if (!SESSION || !currentUserTgId) return;
+    
+    var select = document.getElementById('itemSelect');
+    var rarity = document.getElementById('itemRarity').value;
+    var level = parseInt(document.getElementById('itemLevel').value) || 1;
+    var result = document.getElementById('giveResult');
+    
+    if (!select.value) {
+      result.innerHTML = '<span style="color:#e74c3c;">Выберите предмет</span>';
+      return;
+    }
+    
+    var itemData = JSON.parse(select.value);
+    
+    var stats = {};
+    if (itemData.stats) {
+      itemData.stats.forEach(function(s) {
+        var base = level * 2.5;
+        var mult = 1 + ['common','uncommon','rare','epic','legend'].indexOf(rarity) * 0.55;
+        var isPrimary = (s === itemData.primary);
+        stats[s] = Math.floor(base * mult * (isPrimary ? 1.0 : 0.45) * (0.85 + Math.random() * 0.3));
+        if (stats[s] < 1) stats[s] = 1;
+      });
+    }
+    
+    var payload = {
+      slot: itemData.slot,
+      name: itemData.name,
+      rarity: rarity,
+      level: level,
+      stats: stats,
+      icon: 'images/ac.png'
+    };
+    
+    if (itemData.forClass) payload.forClass = itemData.forClass;
+    
+    result.innerHTML = '<span style="color:#f5c542;">Отправка...</span>';
+    
+    fetch(API + '/admin/api/user/' + currentUserTgId + '/give-item?session=' + SESSION, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.ok) {
+        result.innerHTML = '<span style="color:#2ecc71;">✅ Выдано: ' + itemData.name + '</span>';
+        // Обновляем модалку
+        openUser(currentUserTgId);
+      } else {
+        result.innerHTML = '<span style="color:#e74c3c;">❌ ' + (r.error || 'Ошибка') + '</span>';
+      }
+    })
+    .catch(function() {
+      result.innerHTML = '<span style="color:#e74c3c;">❌ Ошибка соединения</span>';
+    });
+  }
+
+  window.giveItem = giveItem;
+
+  // ── Обновление пользователя ──
+  function updateUser(field) {
+    if (!SESSION || !currentUserTgId) return;
+    
+    var inputMap = {
+      gold: 'editGold',
+      pixr: 'editPixr',
+      gram: 'editGram',
+      level: 'editLevel',
+      floor: 'editFloor'
+    };
+    
+    var el = document.getElementById(inputMap[field]);
+    if (!el) return;
+    
+    var value = parseFloat(el.value);
+    if (isNaN(value) || value < 0) return;
+    
+    var updates = {};
+    updates[field] = value;
+    
+    fetch(API + '/admin/api/user/' + currentUserTgId + '/update?session=' + SESSION, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.ok) {
+        el.value = '';
+        openUser(currentUserTgId);
+        loadUsers(currentPage);
+      }
+    });
+  }
+
+  // ── Сброс прогресса пользователя ──
+  function resetUserProgress() {
+    if (!SESSION || !currentUserTgId) return;
+    var result = document.getElementById('resetResult');
+    
+    if (!confirm('⚠️ Сбросить ВЕСЬ прогресс игрока?\n\nБудет удалено:\n• Персонаж и класс\n• Инвентарь и экипировка\n• Золото, PIXR, GRAM\n• Уровень, этаж, навыки\n• Руда, зелья, улучшения\n\nРефералы и реферальные бонусы СОХРАНЯТСЯ.\n\nОтменить нельзя!')) return;
+
+    result.style.color = '#f5c542';
+    result.textContent = '⏳ Сброс...';
+
+    fetch(API + '/admin/api/user/' + currentUserTgId + '/reset?session=' + SESSION, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.ok) {
+        result.style.color = '#2ecc71';
+        result.textContent = '✅ Прогресс сброшен';
+        setTimeout(function() {
+          openUser(currentUserTgId);
+          loadUsers(currentPage);
+        }, 1200);
+      } else {
+        result.style.color = '#e74c3c';
+        result.textContent = '❌ Ошибка: ' + (r.error || '?');
+      }
+    })
+    .catch(function() {
+      result.style.color = '#e74c3c';
+      result.textContent = '❌ Ошибка соединения';
+    });
+  }
+
+  window.resetUserProgress = resetUserProgress;
+
+  window.updateUser = updateUser;
+
+  // ═══════════════════════════════
+  //  ЭКОНОМИКА
+  // ═══════════════════════════════
+
+  function loadEconomy() {
+    if (!SESSION) return;
+    
+    fetch(API + '/admin/api/users?session=' + SESSION + '&limit=50')
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) return;
+        
+        var users = r.users || [];
+        
+        // Топ по золоту
+        var goldSorted = users.slice().sort(function(a, b) {
+          return (b.data && b.data.gold || 0) - (a.data && a.data.gold || 0);
+        }).slice(0, 10);
+        
+        var goldHtml = '';
+        goldSorted.forEach(function(u, i) {
+          goldHtml += '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #0a0a1a;font-size:12px;">' +
+            '<span>' + (i+1) + '. ' + (u.firstName || u.username || 'Игрок') + '</span>' +
+            '<span style="color:#f5c542;">' + (u.data && u.data.gold || 0) + ' 💰</span>' +
+            '</div>';
+        });
+        document.getElementById('topGold').innerHTML = goldHtml || '<div style="color:#445;padding:10px 0;">Нет данных</div>';
+        
+        // Топ по PIXR
+        var pixrSorted = users.slice().sort(function(a, b) {
+          return (b.data && b.data.pixr || 0) - (a.data && a.data.pixr || 0);
+        }).slice(0, 10);
+        
+        var pixrHtml = '';
+        pixrSorted.forEach(function(u, i) {
+          pixrHtml += '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #0a0a1a;font-size:12px;">' +
+            '<span>' + (i+1) + '. ' + (u.firstName || u.username || 'Игрок') + '</span>' +
+            '<span style="color:#ff44cc;">' + (u.data && u.data.pixr || 0) + ' 💎</span>' +
+            '</div>';
+        });
+        document.getElementById('topPixr').innerHTML = pixrHtml || '<div style="color:#445;padding:10px 0;">Нет данных</div>';
+        
+        // Топ по GRAM
+        var gramSorted = users.slice().sort(function(a, b) {
+          return (b.data && b.data.gram || 0) - (a.data && a.data.gram || 0);
+        }).slice(0, 10);
+        
+        var gramHtml = '';
+        gramSorted.forEach(function(u, i) {
+          gramHtml += '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #0a0a1a;font-size:12px;">' +
+            '<span>' + (i+1) + '. ' + (u.firstName || u.username || 'Игрок') + '</span>' +
+            '<span style="color:#40d0ff;">' + (u.data && u.data.gram || 0) + ' ⭐</span>' +
+            '</div>';
+        });
+        document.getElementById('topGram').innerHTML = gramHtml || '<div style="color:#445;padding:10px 0;">Нет данных</div>';
+      });
+  }
+
+  // ═══════════════════════════════
+  //  РАССЫЛКА
+  // ═══════════════════════════════
+
+  function sendBroadcast() {
+    if (!SESSION) return;
+    
+    var message = document.getElementById('broadcastMessage').value.trim();
+    var target = document.getElementById('broadcastTarget').value;
+    var result = document.getElementById('broadcastResult');
+    
+    if (!message) {
+      result.innerHTML = '<div style="color:#e74c3c;margin-top:8px;">Введите сообщение</div>';
+      return;
+    }
+    
+    result.innerHTML = '<div style="color:#f5c542;margin-top:8px;">Отправка...</div>';
+    
+    fetch(API + '/admin/api/broadcast?session=' + SESSION, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, target })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.ok) {
+        result.innerHTML = '<div style="color:#2ecc71;margin-top:8px;">✅ Отправлено ' + (r.sent || 0) + ' пользователям</div>';
+        document.getElementById('broadcastMessage').value = '';
+      } else {
+        result.innerHTML = '<div style="color:#e74c3c;margin-top:8px;">❌ Ошибка: ' + (r.error || '') + '</div>';
+      }
+    })
+    .catch(function() {
+      result.innerHTML = '<div style="color:#e74c3c;margin-top:8px;">❌ Ошибка соединения</div>';
+    });
+  }
+
+  window.sendBroadcast = sendBroadcast;
+
+  // ═══════════════════════════════
+  //  ЛОГИ
+  // ═══════════════════════════════
+
+  function loadLogs() {
+    if (!SESSION) return;
+    
+    fetch(API + '/admin/api/logs?session=' + SESSION)
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) return;
+        
+        var html = '';
+        (r.logs || []).forEach(function(log) {
+          var time = new Date(log.timestamp).toLocaleString();
+          html += '<div class="log-row">' +
+            '<span class="log-time">' + time + '</span> ' +
+            '<span class="log-admin">' + log.admin + '</span> ' +
+            '<span class="log-action">' + log.action + '</span> ' +
+            (log.target ? '<span class="log-target">→ ' + log.target + '</span>' : '') +
+            '</div>';
+        });
+        
+        document.getElementById('logsList').innerHTML = html || '<div style="color:#445;padding:20px 0;text-align:center;">Логов пока нет</div>';
+      });
+  }
+
+  // ═══════════════════════════════
+  //  УПРАВЛЕНИЕ ЗАДАНИЯМИ (админка)
+  // ═══════════════════════════════
+
+  function loadSpecialTasks() {
+    if (!SESSION) return;
+    var list = document.getElementById('specialTasksList');
+    if (!list) return;
+    
+    list.innerHTML = '<div style="color:#445;padding:10px 0;font-size:12px;">Загрузка...</div>';
+    
+    fetch(API + '/admin/api/tasks?session=' + SESSION)
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) {
+          list.innerHTML = '<div style="color:#e74c3c;padding:10px 0;font-size:12px;">❌ Ошибка загрузки</div>';
+          return;
+        }
+        
+        if (!r.tasks || !r.tasks.length) {
+          list.innerHTML = '<div style="color:#445;padding:20px 0;text-align:center;font-size:12px;">📭 Нет заданий</div>';
+          return;
+        }
+        
+        var icons = { gold: '💰', pixr: '💎', potions: '🧪', gram: '⭐' };
+        var html = '<div style="font-size:10px;color:#556;margin-bottom:8px;">Всего: ' + r.tasks.length + ' заданий</div>';
+        
+        r.tasks.forEach(function(t) {
+          var statusColor = t.active ? '#2ecc71' : '#666';
+          var statusText  = t.active ? 'ВКЛ' : 'ВЫКЛ';
+          var statusBg    = t.active ? 'rgba(46,204,113,0.15)' : 'rgba(255,255,255,0.05)';
+          
+          html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid #0a0a1a;background:rgba(255,255,255,0.02);border-radius:6px;margin-bottom:4px;">' +
+              '<div style="flex:1;min-width:0;">' +
+                  '<div style="font-size:13px;font-weight:bold;color:' + (t.active ? '#ddd' : '#556') + ';">' + t.title + '</div>' +
+                  (t.description ? '<div style="font-size:10px;color:#667;margin-top:2px;">' + t.description + '</div>' : '') +
+                  (t.link ? '<div style="font-size:10px;color:#4a8aff;margin-top:2px;word-break:break-all;">🔗 ' + t.link + '</div>' : '') +
+                  '<div style="font-size:11px;color:#f5c542;margin-top:4px;">' + (icons[t.rewardType] || '🎁') + ' ' + t.rewardAmount + ' ' + t.rewardType + '</div>' +
+                  '<div style="font-size:9px;color:#445;margin-top:2px;">ID: ' + t.taskId + '</div>' +
+              '</div>' +
+              '<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">' +
+                  '<button onclick="adminToggleTask(\'' + t.taskId + '\')" style="padding:4px 10px;font-size:10px;background:' + statusBg + ';border:1px solid ' + statusColor + ';border-radius:5px;color:' + statusColor + ';cursor:pointer;font-family:\'Courier New\',monospace;">' + statusText + '</button>' +
+                  '<button onclick="adminDeleteTask(\'' + t.taskId + '\')" style="padding:4px 10px;font-size:10px;background:rgba(231,76,60,0.12);border:1px solid #e74c3c;border-radius:5px;color:#e74c3c;cursor:pointer;font-family:\'Courier New\',monospace;">🗑 Удалить</button>' +
+              '</div>' +
+          '</div>';
+        });
+        
+        list.innerHTML = html;
+      })
+      .catch(function() {
+        list.innerHTML = '<div style="color:#e74c3c;padding:10px 0;font-size:12px;">❌ Ошибка соединения</div>';
+      });
+  }
+
+  function adminCreateTask() {
+    if (!SESSION) return;
+    var title   = document.getElementById('taskTitle').value.trim();
+    var desc    = document.getElementById('taskDesc').value.trim();
+    var link    = document.getElementById('taskLink').value.trim();
+    var linkTxt = document.getElementById('taskLinkText').value.trim() || 'Перейти';
+    var type    = document.getElementById('taskRewardType').value;
+    var amount  = parseInt(document.getElementById('taskRewardAmount').value);
+    var res     = document.getElementById('taskCreateResult');
+
+    if (!title || !amount || amount < 1) {
+      res.style.color = '#e74c3c';
+      res.textContent = '❌ Заполните название и количество';
+      return;
+    }
+
+    res.style.color = '#f5c542';
+    res.textContent = '⏳ Создание...';
+
+    fetch(API + '/admin/api/tasks?session=' + SESSION, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: title,
+        description: desc,
+        link: link,
+        linkText: linkTxt,
+        rewardType: type,
+        rewardAmount: amount
+      })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.ok) {
+        res.style.color = '#2ecc71';
+        res.textContent = '✅ Задание "' + title + '" создано!';
+        document.getElementById('taskTitle').value = '';
+        document.getElementById('taskDesc').value = '';
+        document.getElementById('taskLink').value = '';
+        document.getElementById('taskLinkText').value = '';
+        document.getElementById('taskRewardAmount').value = '';
+        loadSpecialTasks();
+      } else {
+        res.style.color = '#e74c3c';
+        res.textContent = '❌ Ошибка: ' + (r.error || '?');
+      }
+    })
+    .catch(function() {
+      res.style.color = '#e74c3c';
+      res.textContent = '❌ Нет соединения с сервером';
+    });
+  }
+
+  function adminDeleteTask(taskId) {
+    if (!SESSION || !confirm('Удалить задание "' + taskId + '"?')) return;
+    fetch(API + '/admin/api/tasks/' + taskId + '?session=' + SESSION, {
+      method: 'DELETE'
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.ok) {
+        loadSpecialTasks();
+        var res = document.getElementById('taskCreateResult');
+        res.textContent = '🗑 Задание удалено';
+        res.style.color = '#e74c3c';
+        setTimeout(function() { res.textContent = ''; }, 3000);
+      }
+    });
+  }
+
+  function adminToggleTask(taskId) {
+    if (!SESSION) return;
+    fetch(API + '/admin/api/tasks/' + taskId + '/toggle?session=' + SESSION, {
+      method: 'PATCH'
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.ok) loadSpecialTasks();
+    });
+  }
+
+  window.adminCreateTask = adminCreateTask;
+  window.adminDeleteTask = adminDeleteTask;
+  window.adminToggleTask = adminToggleTask;
+
+  // ═══════════════════════════════
+  //  ЗАПУСК
+  // ═══════════════════════════════
+
+  // ═══════════════════════════════
+  //  МАССОВЫЙ СБРОС
+  // ═══════════════════════════════
+
+  function massResetProgress() {
+    if (!SESSION) return;
+    var result = document.getElementById('massResetResult');
+
+    if (!confirm('⚠️ ВНИМАНИЕ! Сброс прогресса ВСЕХ игроков!\n\nБудет удалено у КАЖДОГО игрока:\n• Персонаж и класс\n• Инвентарь и экипировка\n• Золото, PIXR, GRAM\n• Уровень, этаж, навыки, руда\n• Реферальные награды сбросятся (можно забрать снова)\n\nРефералы (связи) сохранятся.\n\nОтменить нельзя! Продолжить?')) return;
+
+    var code = prompt('Введите RESET_ALL для подтверждения:');
+    if (code !== 'RESET_ALL') {
+      result.style.color = '#e74c3c';
+      result.textContent = '❌ Отменено — код не совпал';
+      return;
+    }
+
+    result.style.color = '#f5c542';
+    result.textContent = '⏳ Сброс всех игроков...';
+
+    fetch(API + '/admin/api/reset-all?session=' + SESSION, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: 'RESET_ALL' })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.ok) {
+        result.style.color = '#2ecc71';
+        result.textContent = '✅ Сброшено ' + r.count + ' игроков';
+        loadDashboard();
+      } else {
+        result.style.color = '#e74c3c';
+        result.textContent = '❌ Ошибка: ' + (r.error || '?');
+      }
+    })
+    .catch(function() {
+      result.style.color = '#e74c3c';
+      result.textContent = '❌ Ошибка соединения';
+    });
+  }
+
+  window.massResetProgress = massResetProgress;
+
+  // ═══════════════════════════════
+  //  РЕЙТИНГ ПО ВРЕМЕНИ
+  // ═══════════════════════════════
+
+  var currentPtSort = 'total';
+
+  function fmtTime(sec) {
+    sec = Math.floor(sec || 0);
+    if (sec < 60)  return sec + 'с';
+    if (sec < 3600) return Math.floor(sec / 60) + 'м ' + (sec % 60) + 'с';
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    return h + 'ч ' + m + 'м';
+  }
+
+  function fmtHours(sec) {
+    return (sec / 3600).toFixed(1) + ' ч';
+  }
+
+  function charEmoji(charId) {
+    if (charId === 'fire')  return '🔥';
+    if (charId === 'light') return '✨';
+    if (charId === 'water') return '💧';
+    return '❓';
+  }
+
+  function loadPlaytime(sort) {
+    if (!SESSION) return;
+    currentPtSort = sort || 'total';
+
+    // Кнопки сортировки
+    ['total','today','sessions'].forEach(function(s) {
+      var btn = document.getElementById('ptSort' + s.charAt(0).toUpperCase() + s.slice(1));
+      if (btn) btn.className = 'pt-sort-btn' + (s === currentPtSort ? ' active' : '');
+    });
+
+    var list = document.getElementById('ptList');
+    list.innerHTML = '<div style="color:#445;padding:20px 0;text-align:center;font-size:12px;">Загрузка...</div>';
+
+    fetch(API + '/admin/api/playtime?session=' + SESSION + '&sort=' + currentPtSort + '&limit=100')
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) {
+          list.innerHTML = '<div style="color:#e74c3c;padding:10px 0;font-size:12px;">❌ Ошибка загрузки</div>';
+          return;
+        }
+
+        var players = r.players || [];
+
+        // Сводка
+        var grandTotalH = (r.grandTotal / 3600).toFixed(1);
+        var avg = players.length ? Math.floor(r.grandTotal / players.length) : 0;
+        document.getElementById('ptTotalPlayers').textContent = players.length;
+        document.getElementById('ptGrandTotal').textContent   = grandTotalH + ' ч';
+        document.getElementById('ptAvgTime').textContent      = fmtTime(avg);
+
+        if (!players.length) {
+          list.innerHTML = '<div style="color:#445;padding:20px 0;text-align:center;font-size:12px;">📭 Нет данных</div>';
+          return;
+        }
+
+        var html = '';
+        players.forEach(function(p, i) {
+          var rank    = i + 1;
+          var rankCls = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : '';
+          var rankStr = rank <= 3 ? ['🥇','🥈','🥉'][rank-1] : rank;
+          
+          var mainVal, mainLabel;
+          if (currentPtSort === 'sessions') {
+            mainVal   = p.sessions + ' сессий';
+            mainLabel = 'Всего: ' + fmtTime(p.totalSeconds);
+          } else if (currentPtSort === 'today') {
+            mainVal   = fmtTime(p.todaySeconds);
+            mainLabel = 'Всего: ' + fmtTime(p.totalSeconds);
+          } else {
+            mainVal   = fmtTime(p.totalSeconds);
+            mainLabel = 'Сегодня: ' + fmtTime(p.todaySeconds);
+          }
+
+          var lastSeen = p.lastSeenAt
+            ? new Date(p.lastSeenAt).toLocaleString('ru')
+            : '—';
+
+          html += '<div class="pt-rank-row">' +
+            '<div class="pt-rank-num ' + rankCls + '">' + rankStr + '</div>' +
+            '<div class="pt-info">' +
+              '<div class="pt-name">' + (p.name || 'Игрок') + ' ' + charEmoji(p.charId) + ' <span style="color:#556;font-size:10px;">Lv.' + p.level + '</span></div>' +
+              '<div class="pt-meta">ID: ' + p.tgId + (p.username ? ' · @' + p.username : '') + '</div>' +
+              '<div class="pt-meta">Сессий: ' + p.sessions + ' · Посл.: ' + lastSeen + '</div>' +
+            '</div>' +
+            '<div>' +
+              '<div class="pt-time">' + mainVal + '</div>' +
+              '<div class="pt-today">' + mainLabel + '</div>' +
+            '</div>' +
+          '</div>';
+        });
+
+        list.innerHTML = html;
+      })
+      .catch(function() {
+        list.innerHTML = '<div style="color:#e74c3c;padding:10px 0;font-size:12px;">❌ Ошибка соединения</div>';
+      });
+  }
+
+  window.loadPlaytime = loadPlaytime;
+
+  checkSession();
+
+})();
+</script>
+
+</body>
+</html>

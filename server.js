@@ -25,6 +25,7 @@ const BOT_USERNAME = process.env.BOT_USERNAME || 'YourBotUsername';
 if (!process.env.BOT_USERNAME) console.warn('⚠️  BOT_USERNAME не задан');
 const REF_GOLD_PER_MILESTONE = 500;
 const REF_MILESTONE_STEP     = 5;
+const REF_DEPOSIT_BONUS      = 0.05; // 5% от депозита GRAM другу
 
 // ── CORS ──
 app.use((req, res, next) => {
@@ -132,6 +133,8 @@ const MarketListingSchema = new mongoose.Schema({
   expiresAt:   { type: Number, required: true },
   soldAt:      { type: Number, default: null },
   cancelledAt: { type: Number, default: null },
+  pendingPixr:  { type: Number, default: null },   // PIXR ожидает получения продавцом
+  claimedAt:    { type: Number, default: null },    // когда продавец забрал PIXR
 }, { minimize: false });
 MarketListingSchema.index({ status: 1, createdAt: -1 });
 MarketListingSchema.index({ sellerId: 1, status: 1 });
@@ -151,11 +154,19 @@ setInterval(async () => {
         { new: false }
       );
       if (!updated) continue;
-      // Возвращаем предмет владельцу
-      await Save.findOneAndUpdate(
-        { tgId: listing.sellerId },
-        { $push: { 'data.inventory': listing.item } }
-      );
+      // Возвращаем предмет/руду владельцу
+      if (listing.item && listing.item.isOre) {
+        const oreKey = 'data.ore.' + listing.item.oreId;
+        await Save.findOneAndUpdate(
+          { tgId: listing.sellerId },
+          { $inc: { [oreKey]: listing.item.qty } }
+        );
+      } else {
+        await Save.findOneAndUpdate(
+          { tgId: listing.sellerId },
+          { $push: { 'data.inventory': listing.item } }
+        );
+      }
       notifyClient(listing.sellerId, 'market_expired', { listingId: listing.listingId, item: listing.item });
       console.log(`⏰ [market] Лот ${listing.listingId} истёк — предмет возвращён ${listing.sellerId}`);
     }
@@ -200,6 +211,37 @@ const SpecialTaskSchema = new mongoose.Schema({
 SpecialTaskSchema.index({ active: 1, createdAt: -1 });
 const SpecialTask = mongoose.model('SpecialTask', SpecialTaskSchema);
 
+// ── Глобальная статистика (синглтон) ──
+const GlobalStatSchema = new mongoose.Schema({
+  _id:             { type: String, default: 'global' },
+  pixrExchangedTotal: { type: Number, default: 0 }, // сколько PIXR обменяно на GRAM за всё время
+}, { minimize: false });
+const GlobalStat = mongoose.model('GlobalStat', GlobalStatSchema);
+
+// ── Рейтинг по времени в игре ──
+const PlaytimeRatingSchema = new mongoose.Schema({
+  tgId:         { type: String, required: true, unique: true },
+  username:     { type: String, default: '' },
+  firstName:    { type: String, default: '' },
+  charId:       { type: String, default: null },
+  level:        { type: Number, default: 1 },
+  totalSeconds: { type: Number, default: 0 },  // всё накопленное время
+  todaySeconds: { type: Number, default: 0 },  // секунд сегодня
+  todayDate:    { type: String, default: '' },  // YYYY-MM-DD
+  sessions:     { type: Number, default: 0 },
+  lastSeenAt:   { type: Number, default: 0 },
+  updatedAt:    { type: Number, default: 0 },
+}, { minimize: false });
+PlaytimeRatingSchema.index({ totalSeconds: -1 });
+PlaytimeRatingSchema.index({ todaySeconds: -1 });
+PlaytimeRatingSchema.index({ lastSeenAt: -1 });
+const PlaytimeRating = mongoose.model('PlaytimeRating', PlaytimeRatingSchema);
+
+// Константы обмена
+const PIXR_EXCHANGE_THRESHOLD = 5_000_000; // после этого порога цена меняется
+const PIXR_PER_GRAM_CHEAP     = 1000;      // до порога: 1000 PIXR = 1 GRAM
+const PIXR_PER_GRAM_EXP       = 2000;      // после порога: 2000 PIXR = 1 GRAM
+const GRAM_PER_PIXR_RATE      = 800;       // 1 GRAM → 800 PIXR (обратный)
 
 // ═══════════════════════════════
 //  КОНФИГ КОШЕЛЬКА
@@ -380,6 +422,10 @@ app.get('/', (req, res) => {
   res.json({ ok: true, service: 'pixel-rpg', db: mongoose.connection.readyState === 1 });
 });
 
+app.get('/api/ping', (req, res) => {
+  res.json({ ok: true });
+});
+
 app.post('/api/load', async (req, res) => {
   const tg = authUser(req, res); 
   if (!tg) return;
@@ -479,23 +525,33 @@ app.post('/api/save', async (req, res) => {
     data.tgId = tg.id;
     
     const currentDoc = await Save.findOne({ tgId: tg.id }).lean();
-    if (currentDoc && currentDoc.data && currentDoc.data.updatedAt) {
+    if (currentDoc) {
       const clientUpdatedAt = data.updatedAt || 0;
-      const serverUpdatedAt = currentDoc.data.updatedAt || 0;
-      
+      const serverData = currentDoc.data || {};
+      const serverUpdatedAt = serverData.updatedAt || 0;
+
+      // ✅ Если был сброс — клиент не знает об этом, блокируем его старые данные
+      const resetAt = serverData._resetAt || 0;
+      if (resetAt > clientUpdatedAt) {
+        console.log(`🛑 [save] Блок после сброса для ${tg.id}: resetAt=${resetAt} > clientAt=${clientUpdatedAt}`);
+        // Принудительно шлём reload через SSE и блокируем save
+        notifyClient(tg.id, 'force_close', { reason: 'progress_reset' });
+        return res.json({ ok: false, error: 'reset_detected', updatedAt: serverUpdatedAt, resetAt });
+      }
+
       if (serverUpdatedAt > clientUpdatedAt) {
         console.log(`⚠️ [save] Игнорируем устаревшие данные для ${tg.id}`);
         return res.json({ ok: true, updatedAt: serverUpdatedAt, ignored: true });
       }
 
       // ✅ Защита от перезаписи AdminUpdatedAt
-      const adminUpdatedAt = (currentDoc.data._adminUpdatedAt) || 0;
+      const adminUpdatedAt = serverData._adminUpdatedAt || 0;
       if (adminUpdatedAt > clientUpdatedAt) {
         console.log(`🛡️ [save] Мёрж с админскими изменениями для ${tg.id}`);
-        if (currentDoc.data.gram      !== undefined) data.gram      = currentDoc.data.gram;
-        if (currentDoc.data.gold      !== undefined) data.gold      = currentDoc.data.gold;
-        if (currentDoc.data.pixr      !== undefined) data.pixr      = currentDoc.data.pixr;
-        if (currentDoc.data.inventory !== undefined) data.inventory = currentDoc.data.inventory;
+        if (serverData.gram      !== undefined) data.gram      = serverData.gram;
+        if (serverData.gold      !== undefined) data.gold      = serverData.gold;
+        if (serverData.pixr      !== undefined) data.pixr      = serverData.pixr;
+        if (serverData.inventory !== undefined) data.inventory = serverData.inventory;
         data._adminUpdatedAt = adminUpdatedAt;
       }
     }
@@ -518,6 +574,63 @@ app.post('/api/save', async (req, res) => {
       },
       { upsert: true, new: false, lean: true }
     );
+
+    // ── Обновляем рейтинг по времени ──
+    try {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const dailyTasks = data.dailyTasks || {};
+      // Секунд сыграно сегодня согласно клиенту
+      const clientTodaySeconds = (dailyTasks.date === todayStr) ? (dailyTasks.seconds || 0) : 0;
+
+      const ptDoc = await PlaytimeRating.findOne({ tgId: tg.id }).lean();
+
+      if (!ptDoc) {
+        // Первая запись: totalSeconds = сегодняшние секунды
+        // (прошлые дни не восстановить, но хотя бы не теряем сегодня)
+        await PlaytimeRating.create({
+          tgId:         tg.id,
+          username:     tg.username,
+          firstName:    tg.firstName,
+          charId:       data.charId || null,
+          level:        Number(data.level) || 1,
+          totalSeconds: clientTodaySeconds,
+          todaySeconds: clientTodaySeconds,
+          todayDate:    todayStr,
+          sessions:     0,
+          lastSeenAt:   data.updatedAt,
+          updatedAt:    data.updatedAt,
+        });
+      } else {
+        const isSameDay = ptDoc.todayDate === todayStr;
+        const prevTodaySeconds = isSameDay ? (ptDoc.todaySeconds || 0) : 0;
+
+        // Сколько новых секунд появилось за этот save
+        const todayDelta = Math.max(0, clientTodaySeconds - prevTodaySeconds);
+
+        // Если день сменился — старые todaySeconds уже вошли в total в прошлый раз,
+        // поэтому прибавляем только новые секунды нового дня
+        const totalDelta = isSameDay ? todayDelta : clientTodaySeconds;
+
+        await PlaytimeRating.findOneAndUpdate(
+          { tgId: tg.id },
+          {
+            $set: {
+              username:     tg.username,
+              firstName:    tg.firstName,
+              charId:       data.charId || null,
+              level:        Number(data.level) || 1,
+              todaySeconds: clientTodaySeconds,
+              todayDate:    todayStr,
+              lastSeenAt:   data.updatedAt,
+              updatedAt:    data.updatedAt,
+            },
+            $inc: { totalSeconds: totalDelta },
+          }
+        );
+      }
+    } catch (ptErr) {
+      console.error('⚠️ [playtime] update error:', ptErr.message);
+    }
 
     const duration = Date.now() - startTime;
     console.log(`✅ [save] Сохранено для ${tg.id} (${duration}ms)`);
@@ -1104,30 +1217,46 @@ app.post('/api/wallet/transactions', async (req, res) => {
   }
 });
 
+// ── PIXR → GRAM ──
 app.post('/api/wallet/exchange', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
-  
+
   const { amount } = req.body;
-  
-  if (!amount || amount < 1000 || amount % 1000 !== 0) {
-    return res.status(400).json({ 
-      ok: false, 
-      error: 'Сумма должна быть кратна 1000 PIXR (минимум 1000)' 
-    });
+  if (!amount || amount < 1 || !Number.isInteger(amount)) {
+    return res.status(400).json({ ok: false, error: 'Некорректная сумма PIXR' });
   }
-  
+
   try {
-    const gramEarned = amount / 1000;
+    // Получаем текущую глобальную статистику
+    let gstat = await GlobalStat.findOneAndUpdate(
+      { _id: 'global' },
+      { $setOnInsert: { pixrExchangedTotal: 0 } },
+      { upsert: true, new: true }
+    );
+    const totalBefore = gstat.pixrExchangedTotal || 0;
+
+    // Определяем цену за 1 GRAM в PIXR с учётом порога
+    const rate = totalBefore >= PIXR_EXCHANGE_THRESHOLD ? PIXR_PER_GRAM_EXP : PIXR_PER_GRAM_CHEAP;
+
+    if (amount % rate !== 0) {
+      return res.status(400).json({
+        ok: false,
+        error: `Сумма должна быть кратна ${rate} PIXR`
+      });
+    }
+    if (amount < rate) {
+      return res.status(400).json({
+        ok: false,
+        error: `Минимум ${rate} PIXR для обмена`
+      });
+    }
+
+    const gramEarned = amount / rate;
 
     const result = await Save.findOneAndUpdate(
       { tgId: tg.id, 'data.pixr': { $gte: amount } },
-      {
-        $inc: {
-          'data.pixr': -amount,
-          'data.gram': gramEarned,
-        }
-      },
+      { $inc: { 'data.pixr': -amount, 'data.gram': gramEarned } },
       { new: true }
     );
 
@@ -1135,14 +1264,72 @@ app.post('/api/wallet/exchange', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Недостаточно PIXR' });
     }
 
+    // Обновляем глобальный счётчик
+    await GlobalStat.findOneAndUpdate(
+      { _id: 'global' },
+      { $inc: { pixrExchangedTotal: amount } },
+      { upsert: true }
+    );
+
     res.json({
       ok: true,
       pixr: result.data.pixr,
       gram: result.data.gram,
-      earned: gramEarned
+      earned: gramEarned,
+      rate,
+      totalExchanged: totalBefore + amount
     });
   } catch (e) {
     console.error('❌ [wallet] exchange error:', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
+// ── GRAM → PIXR ──
+app.post('/api/wallet/exchange-gram', async (req, res) => {
+  const tg = authUser(req, res);
+  if (!tg) return;
+
+  const { amount } = req.body; // amount в GRAM (целое число)
+  if (!amount || amount < 1 || !Number.isInteger(amount)) {
+    return res.status(400).json({ ok: false, error: 'Минимум 1 GRAM для обмена' });
+  }
+
+  try {
+    const pixrEarned = amount * GRAM_PER_PIXR_RATE;
+
+    const result = await Save.findOneAndUpdate(
+      { tgId: tg.id, 'data.gram': { $gte: amount } },
+      { $inc: { 'data.gram': -amount, 'data.pixr': pixrEarned } },
+      { new: true }
+    );
+
+    if (!result) {
+      return res.status(400).json({ ok: false, error: 'Недостаточно GRAM' });
+    }
+
+    res.json({
+      ok: true,
+      pixr: result.data.pixr,
+      gram: result.data.gram,
+      earned: pixrEarned
+    });
+  } catch (e) {
+    console.error('❌ [wallet] exchange-gram error:', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
+// ── Глобальная статистика обмена (для индикатора) ──
+app.get('/api/wallet/exchange-stats', async (req, res) => {
+  try {
+    const gstat = await GlobalStat.findOne({ _id: 'global' }).lean();
+    const total = gstat ? (gstat.pixrExchangedTotal || 0) : 0;
+    const threshold = PIXR_EXCHANGE_THRESHOLD;
+    const currentRate = total >= threshold ? PIXR_PER_GRAM_EXP : PIXR_PER_GRAM_CHEAP;
+    res.json({ ok: true, totalExchanged: total, threshold, currentRate, gramPerPixr: GRAM_PER_PIXR_RATE });
+  } catch (e) {
+    console.error('❌ [wallet] exchange-stats error:', e.message);
     res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
@@ -1153,7 +1340,7 @@ app.post('/api/wallet/exchange', async (req, res) => {
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEBAPP_URL = process.env.WEBAPP_URL || 'https://your-domain.railway.app';
-const API_URL = process.env.API_URL || 'https://ghz-production.up.railway.app';
+const API_URL = process.env.API_URL || 'https://tets-production-4fdc.up.railway.app/';
 
 let bot = null;
 
@@ -1771,6 +1958,102 @@ app.post('/admin/api/user/:tgId/give-item', requireAdmin, async (req, res) => {
   }
 });
 
+// ── Админ: сброс прогресса пользователя (сохраняет рефералов) ──
+app.post('/admin/api/user/:tgId/reset', requireAdmin, async (req, res) => {
+  try {
+    const { tgId } = req.params;
+
+    const user = await Save.findOne({ tgId }).lean();
+    if (!user) return res.status(404).json({ ok: false, error: 'user_not_found' });
+
+    // Обнуляем выплаченные награды (значения→0), но сохраняем сам список рефералов (ключи)
+    const oldMilestones = user.refMilestones || {};
+    const clearedMilestones = {};
+    Object.keys(oldMilestones).forEach(k => { clearedMilestones[k] = 0; });
+
+    const resetNow = Date.now();
+    const resetUpdate = {
+      charId:        null,
+      level:         1,
+      cp:            0,
+      floor:         1,
+      updatedAt:     resetNow,
+      refMilestones: clearedMilestones,
+      refClaimVer:   0,
+      data: {
+        tgId:            tgId,
+        charId:          null,
+        refBy:           user.refBy || null,
+        updatedAt:       resetNow,
+        _adminUpdatedAt: resetNow,
+        _resetAt:        resetNow,
+      }
+    };
+
+    await Save.updateOne({ tgId }, { $set: resetUpdate });
+
+    console.log(`🔄 [admin] Прогресс сброшен для ${tgId} (рефералы сохранены, награды сброшены)`);
+    await logAdminAction(req.admin.login, 'reset_progress', tgId, { preserved: ['refBy'], cleared: ['refMilestones_values', 'refClaimVer'] });
+
+    notifyClient(tgId, 'force_close', { reason: 'progress_reset' });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('❌ [admin] reset error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── Админ: сброс прогресса ВСЕХ пользователей ──
+app.post('/admin/api/reset-all', requireAdmin, async (req, res) => {
+  try {
+    const { confirm } = req.body;
+    if (confirm !== 'RESET_ALL') {
+      return res.status(400).json({ ok: false, error: 'confirmation_required' });
+    }
+
+    const users = await Save.find({}, 'tgId refBy refMilestones').lean();
+
+    let processed = 0;
+    for (const user of users) {
+      const oldMilestones = user.refMilestones || {};
+      const clearedMilestones = {};
+      Object.keys(oldMilestones).forEach(k => { clearedMilestones[k] = 0; });
+
+      const resetNow = Date.now();
+      await Save.updateOne({ tgId: user.tgId }, {
+        $set: {
+          charId:        null,
+          level:         1,
+          cp:            0,
+          floor:         1,
+          updatedAt:     resetNow,
+          refMilestones: clearedMilestones,
+          refClaimVer:   0,
+          data: {
+            tgId:            user.tgId,
+            charId:          null,
+            refBy:           user.refBy || null,
+            updatedAt:       resetNow,
+            _adminUpdatedAt: resetNow,
+            _resetAt:        resetNow,
+          }
+        }
+      });
+      notifyClient(user.tgId, 'force_close', { reason: 'progress_reset' });
+      processed++;
+    }
+
+    console.log(`🔄 [admin] Массовый сброс: ${processed} игроков`);
+    await logAdminAction(req.admin.login, 'reset_all_progress', 'ALL', { count: processed });
+
+    res.json({ ok: true, count: processed });
+  } catch (e) {
+    console.error('❌ [admin] reset-all error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── Админ: подтверждение транзакции ──
 app.post('/admin/api/transaction/:txId/:action', requireAdmin, async (req, res) => {
   try {
@@ -1819,6 +2102,44 @@ app.post('/admin/api/transaction/:txId/:action', requireAdmin, async (req, res) 
         reason: 'balance_updated',
         gram: result?.data?.gram || 0
       });
+
+      // ── Реферальный бонус: 5% от депозита GRAM рефереру ──
+      if (tx.type === 'deposit' && tx.amount > 0) {
+        try {
+          const depositor = await Save.findOne({ tgId: tx.userId }, 'refBy firstName username').lean();
+          if (depositor && depositor.refBy) {
+            const bonus = Math.round(tx.amount * REF_DEPOSIT_BONUS * 1000) / 1000;
+            if (bonus > 0) {
+              const refUpdatedAt = Date.now();
+              const refResult = await Save.findOneAndUpdate(
+                { tgId: depositor.refBy },
+                {
+                  $inc: { 'data.gram': bonus },
+                  $set: { 'data.updatedAt': refUpdatedAt, updatedAt: refUpdatedAt }
+                },
+                { new: true }
+              );
+              console.log(`🎁 [admin] Реф. бонус ${bonus} GRAM → ${depositor.refBy} (от депозита ${tx.amount} GRAM пользователя ${tx.userId})`);
+              notifyClient(depositor.refBy, 'reload', {
+                reason: 'ref_bonus',
+                gram: refResult?.data?.gram || 0
+              });
+              if (bot) {
+                const depositorName = depositor.firstName || depositor.username || tx.userId;
+                try {
+                  await bot.sendMessage(
+                    depositor.refBy,
+                    `🎁 *Реферальный бонус!*\n\nВаш друг *${depositorName}* пополнил баланс на *${tx.amount} GRAM*\nВы получили *+${bonus} GRAM* (5%) на счёт!`,
+                    { parse_mode: 'Markdown' }
+                  );
+                } catch (e) {}
+              }
+            }
+          }
+        } catch (refErr) {
+          console.error('❌ [admin] Ошибка начисления реф. бонуса:', refErr.message);
+        }
+      }
     }
     
     await logAdminAction(req.admin.login, action + '_transaction', tx.userId, { txId, amount: tx.amount });
@@ -1852,19 +2173,19 @@ app.get('/admin/api/items/list', requireAdmin, (req, res) => {
     const items = [];
     
     const ITEM_TYPES = [
-      { slot: 'body', name: 'Нагрудник', stats: ['def', 'hp'], primary: 'def' },
-      { slot: 'legs', name: 'Штаны', stats: ['def', 'dodge'], primary: 'def' },
-      { slot: 'gloves', name: 'Перчатки', stats: ['atk', 'crit'], primary: 'atk' },
-      { slot: 'boots', name: 'Боты', stats: ['spd', 'dodge'], primary: 'spd' },
-      { slot: 'helmet', name: 'Шлем', stats: ['def', 'hp'], primary: 'def' },
-      { slot: 'ring', name: 'Кольцо', stats: ['crit', 'atk'], primary: 'crit' },
-      { slot: 'belt', name: 'Пояс', stats: ['hp', 'def'], primary: 'hp' }
+      { slot: 'body',   name: 'Нагрудник', stats: ['def', 'hp'],   primary: 'def' },
+      { slot: 'legs',   name: 'Штаны',     stats: ['def', 'dodge'], primary: 'def' },
+      { slot: 'gloves', name: 'Перчатки',  stats: ['atk', 'def'],  primary: 'atk' },
+      { slot: 'boots',  name: 'Боты',      stats: ['spd', 'dodge'], primary: 'spd' },
+      { slot: 'helmet', name: 'Шлем',      stats: ['def', 'hp'],   primary: 'def' },
+      { slot: 'ring',   name: 'Кольцо',    stats: ['atk', 'spd'],  primary: 'atk' },
+      { slot: 'belt',   name: 'Пояс',      stats: ['hp', 'def'],   primary: 'hp'  }
     ];
-    
+
     const STAFF_TYPES = [
-      { slot: 'weapon', name: 'Посох огня', stats: ['atk', 'crit'], primary: 'atk', forClass: 'fire', classLabel: 'Пирокан' },
-      { slot: 'weapon', name: 'Посох света', stats: ['atk', 'hp'], primary: 'atk', forClass: 'light', classLabel: 'Люмос' },
-      { slot: 'weapon', name: 'Посох воды', stats: ['atk', 'dodge'], primary: 'atk', forClass: 'water', classLabel: 'Аквас' }
+      { slot: 'weapon', name: 'Посох огня',  stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'fire',  classLabel: 'Пирокан' },
+      { slot: 'weapon', name: 'Посох света', stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'light', classLabel: 'Люмос'   },
+      { slot: 'weapon', name: 'Посох воды',  stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'water', classLabel: 'Аквас'   }
     ];
     
     ITEM_TYPES.forEach(type => items.push({
@@ -1919,11 +2240,50 @@ app.get('/admin/api/stats', requireAdmin, async (req, res) => {
         active24h,
         floors,
         topCP,
-        online: adminSessions.size
+        online: await Save.countDocuments({ updatedAt: { $gt: Date.now() - 5 * 60 * 1000 } })
       }
     });
   } catch (e) {
     console.error('❌ [admin] stats error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── Админ: рейтинг по времени (топ-50) ──
+app.get('/admin/api/playtime', requireAdmin, async (req, res) => {
+  try {
+    const limit     = Math.min(parseInt(req.query.limit) || 50, 200);
+    const sortBy    = req.query.sort || 'total';
+    const sortField = sortBy === 'today' ? 'todaySeconds' : sortBy === 'sessions' ? 'sessions' : 'totalSeconds';
+
+    const top = await PlaytimeRating.find()
+      .sort({ [sortField]: -1 })
+      .limit(limit)
+      .lean();
+
+    const agg = await PlaytimeRating.aggregate([
+      { $group: { _id: null, total: { $sum: '$totalSeconds' } } }
+    ]);
+    const grandTotal = (agg[0] && agg[0].total) || 0;
+
+    res.json({
+      ok: true,
+      grandTotal,
+      players: top.map((p, i) => ({
+        rank:         i + 1,
+        tgId:         p.tgId,
+        name:         p.firstName || p.username || 'Игрок',
+        username:     p.username || '',
+        charId:       p.charId,
+        level:        p.level || 1,
+        totalSeconds: p.totalSeconds || 0,
+        todaySeconds: p.todaySeconds || 0,
+        sessions:     p.sessions || 0,
+        lastSeenAt:   p.lastSeenAt || 0,
+      })),
+    });
+  } catch (e) {
+    console.error('❌ [admin] playtime error:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -2023,7 +2383,7 @@ app.get('/admin', (req, res) => {
 //  МАРКЕТ
 // ═══════════════════════════════
 
-const MARKET_OPEN_COST  = 1000;
+const MARKET_OPEN_COST  = 1;
 const MARKET_MAX_LOTS   = 3;
 const MARKET_TTL_MS     = 48 * 60 * 60 * 1000; // 48 часов
 const MARKET_COMMISSION = 0.10;
@@ -2086,17 +2446,77 @@ app.post('/api/market/list', async (req, res) => {
   }
 });
 
-// ── Мои лоты ──
+// ── Мои лоты (активные + проданные к получению) ──
 app.post('/api/market/my', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
   try {
-    const listings = await MarketListing.find({ sellerId: tg.id, status: 'active' })
+    // Активные лоты + проданные у которых pendingPixr ещё не получен
+    const listings = await MarketListing.find({
+      sellerId: tg.id,
+      $or: [
+        { status: 'active' },
+        { status: 'sold', claimedAt: null }
+      ]
+    })
       .sort({ createdAt: -1 })
       .lean();
     res.json({ ok: true, listings });
   } catch (e) {
     console.error('❌ [market/my] error:', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
+// ── Забрать PIXR за проданный лот ──
+app.post('/api/market/claim', async (req, res) => {
+  const tg = authUser(req, res);
+  if (!tg) return;
+  try {
+    const { listingId } = req.body || {};
+    if (!listingId) return res.status(400).json({ ok: false, error: 'bad_params' });
+
+    // Атомарно: найти свой sold-лот с pendingPixr и пометить как claimed
+    const listing = await MarketListing.findOneAndUpdate(
+      { listingId, sellerId: tg.id, status: 'sold', claimedAt: null, pendingPixr: { $gt: 0 } },
+      { $set: { claimedAt: Date.now() } },
+      { new: false }
+    );
+    if (!listing) return res.status(400).json({ ok: false, error: 'not_found' });
+
+    const earned = listing.pendingPixr;
+
+    // Начисляем PIXR продавцу
+    const updated = await Save.findOneAndUpdate(
+      { tgId: tg.id },
+      { $inc: { 'data.pixr': earned }, $set: { updatedAt: Date.now() } },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ ok: false, error: 'user_not_found' });
+
+    console.log(`✅ [market/claim] ${tg.id} забрал ${earned} PIXR за лот ${listingId}`);
+    res.json({ ok: true, earned, pixr: updated.data.pixr });
+  } catch (e) {
+    console.error('❌ [market/claim] error:', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
+// ── История продаж ──
+app.post('/api/market/history', async (req, res) => {
+  const tg = authUser(req, res);
+  if (!tg) return;
+  try {
+    const listings = await MarketListing.find({
+      sellerId: tg.id,
+      status: { $in: ['sold', 'cancelled'] }
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+    res.json({ ok: true, listings });
+  } catch (e) {
+    console.error('❌ [market/history] error:', e.message);
     res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
@@ -2153,8 +2573,9 @@ app.post('/api/market/sell', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'item_not_found' });
     }
 
-    const item = inventory[itemIdx];
-    console.log(`✅ [market/sell] item found: ${item.name}`);
+    // Очищаем служебные поля перед сохранением в листинг
+    const item = Object.assign({}, inventory[itemIdx]);
+    console.log(`✅ [market/sell] item found: ${item.name}, refine=${item.refine || 0}`);
 
     if (!item.isSkillBook && !MARKET_MIN_RARITY.includes(item.rarity)) {
       return res.status(400).json({ ok: false, error: 'rarity_too_low' });
@@ -2162,6 +2583,7 @@ app.post('/api/market/sell', async (req, res) => {
     if (item._equipped) {
       return res.status(400).json({ ok: false, error: 'item_equipped' });
     }
+    delete item._equipped;
 
     // Удаляем предмет из инвентаря
     const updated = await Save.findOneAndUpdate(
@@ -2198,6 +2620,72 @@ app.post('/api/market/sell', async (req, res) => {
 });
 
 // ── Купить лот ──
+
+// ── Выставить руду на маркет ──
+app.post('/api/market/sell-ore', async (req, res) => {
+  const tg = authUser(req, res);
+  if (!tg) return res.status(401).json({ ok: false, error: 'auth_failed' });
+  if (_listingLocks.has(tg.id)) return res.status(429).json({ ok: false, error: 'in_progress' });
+  _listingLocks.add(tg.id);
+  try {
+    const { oreId, qty, price } = req.body || {};
+    if (!oreId || !qty || qty < 1 || !price || price < 1) {
+      return res.status(400).json({ ok: false, error: 'bad_params' });
+    }
+
+    const user = await Save.findOne({ tgId: tg.id }).lean();
+    if (!user || !user.data) return res.status(404).json({ ok: false, error: 'no_save' });
+    if (!user.data.marketUnlocked) return res.status(403).json({ ok: false, error: 'market_locked' });
+
+    const activeCount = await MarketListing.countDocuments({ sellerId: tg.id, status: 'active' });
+    if (activeCount >= MARKET_MAX_LOTS) return res.status(400).json({ ok: false, error: 'max_lots' });
+
+    const haveQty = (user.data.ore || {})[oreId] || 0;
+    if (haveQty < qty) return res.status(400).json({ ok: false, error: 'not_enough' });
+
+    // Атомарно списываем руду
+    const incKey = 'data.ore.' + oreId;
+    const updated = await Save.findOneAndUpdate(
+      { tgId: tg.id, [incKey]: { $gte: qty } },
+      { $inc: { [incKey]: -qty }, $set: { updatedAt: Date.now() } },
+      { new: true }
+    );
+    if (!updated) return res.status(400).json({ ok: false, error: 'not_enough' });
+
+    const ORE_NAMES = { core:'Обычная руда', uore:'Необычная руда', rore:'Редкая руда', eore:'Эпическая руда', lore:'Легендарная руда' };
+    const ORE_ICONS = { core:'images/core.png', uore:'images/uore.png', rore:'images/rore.png', eore:'images/eore.png', lore:'images/lore.png' };
+    const oreItem = {
+      isOre:  true,
+      oreId,
+      qty:    Math.floor(qty),
+      name:   (ORE_NAMES[oreId] || oreId) + ' ×' + qty,
+      icon:   ORE_ICONS[oreId] || 'images/core.png',
+      rarity: { core:'common', uore:'uncommon', rore:'rare', eore:'epic', lore:'legend' }[oreId] || 'common',
+    };
+
+    const now = Date.now();
+    const listingId = 'ore_' + now + '_' + Math.random().toString(36).substring(2, 6);
+    const listing = await MarketListing.create({
+      listingId,
+      sellerId:   tg.id,
+      sellerName: user.firstName || user.username || 'Игрок',
+      item:       oreItem,
+      price:      Math.floor(price),
+      status:     'active',
+      createdAt:  now,
+      expiresAt:  now + MARKET_TTL_MS,
+    });
+
+    console.log('✅ [market] ' + tg.id + ' выставил руду ' + oreId + '×' + qty + ' за ' + price + ' PIXR');
+    res.json({ ok: true, listing });
+  } catch (e) {
+    console.error('❌ [market/sell-ore] error:', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  } finally {
+    _listingLocks.delete(tg.id);
+  }
+});
+
 const _buyLocks = new Set();
 app.post('/api/market/buy', async (req, res) => {
   const tg = authUser(req, res);
@@ -2219,15 +2707,26 @@ app.post('/api/market/buy', async (req, res) => {
     if (listing.sellerId === tg.id) return res.status(400).json({ ok: false, error: 'own_listing' });
 
     const price = listing.price;
+    const isOre  = !!(listing.item && listing.item.isOre);
 
-    // Атомарно списываем PIXR у покупателя
-    const buyer = await Save.findOneAndUpdate(
-      { tgId: tg.id, 'data.pixr': { $gte: price } },
-      {
+    // Атомарно списываем PIXR у покупателя и начисляем предмет/руду
+    let buyerUpdate;
+    if (isOre) {
+      const oreKey = 'data.ore.' + listing.item.oreId;
+      buyerUpdate = {
+        $inc: { 'data.pixr': -price, [oreKey]: listing.item.qty },
+        $set: { updatedAt: Date.now() }
+      };
+    } else {
+      buyerUpdate = {
         $inc: { 'data.pixr': -price },
         $push: { 'data.inventory': listing.item },
         $set: { updatedAt: Date.now() }
-      },
+      };
+    }
+    const buyer = await Save.findOneAndUpdate(
+      { tgId: tg.id, 'data.pixr': { $gte: price } },
+      buyerUpdate,
       { new: true }
     );
     if (!buyer) return res.status(400).json({ ok: false, error: 'not_enough_pixr' });
@@ -2247,31 +2746,45 @@ app.post('/api/market/buy', async (req, res) => {
     );
     if (!sold) {
       // Лот уже купили — откатываем у покупателя
-      await Save.findOneAndUpdate(
-        { tgId: tg.id },
-        {
-          $inc: { 'data.pixr': price },
-          $pull: { 'data.inventory': { id: listing.item.id } }
-        }
-      );
+      if (isOre) {
+        const oreKey = 'data.ore.' + listing.item.oreId;
+        await Save.findOneAndUpdate(
+          { tgId: tg.id },
+          { $inc: { 'data.pixr': price, [oreKey]: -listing.item.qty } }
+        );
+      } else {
+        await Save.findOneAndUpdate(
+          { tgId: tg.id },
+          {
+            $inc: { 'data.pixr': price },
+            $pull: { 'data.inventory': { id: listing.item.id } }
+          }
+        );
+      }
       return res.status(400).json({ ok: false, error: 'already_sold' });
     }
 
-    // Начисляем продавцу 90%
+    // Начисляем продавцу 90% — НЕ сразу, а как "к получению"
     const sellerEarns = Math.floor(price * (1 - MARKET_COMMISSION));
-    await Save.findOneAndUpdate(
-      { tgId: listing.sellerId },
-      { $inc: { 'data.pixr': sellerEarns } }
+    // Обновляем листинг: ставим pendingPixr (продавец должен забрать вручную)
+    await MarketListing.findOneAndUpdate(
+      { listingId },
+      { $set: { pendingPixr: sellerEarns } }
     );
 
     notifyClient(listing.sellerId, 'market_sold', {
       listingId,
       itemName: listing.item.name,
       earned:   sellerEarns,
+      pending:  true,
     });
 
     console.log(`✅ [market] ${tg.id} купил "${listing.item.name}" у ${listing.sellerId} за ${price} PIXR`);
-    res.json({ ok: true, item: listing.item, pixr: buyer.data.pixr });
+    if (isOre) {
+      res.json({ ok: true, item: listing.item, pixr: buyer.data.pixr, ore: buyer.data.ore || {} });
+    } else {
+      res.json({ ok: true, item: listing.item, pixr: buyer.data.pixr, inventory: buyer.data.inventory });
+    }
   } catch (e) {
     console.error('❌ [market/buy] error:', e.message);
     res.status(500).json({ ok: false, error: 'server_error' });
@@ -2296,15 +2809,29 @@ app.post('/api/market/cancel', async (req, res) => {
     );
     if (!cancelled) return res.status(400).json({ ok: false, error: 'listing_not_found' });
 
-    // Возвращаем предмет в инвентарь
-    const updated = await Save.findOneAndUpdate(
-      { tgId: tg.id },
-      { $push: { 'data.inventory': cancelled.item }, $set: { updatedAt: Date.now() } },
-      { new: true }
-    );
+    // Возвращаем предмет/руду в инвентарь
+    let updated;
+    if (cancelled.item && cancelled.item.isOre) {
+      const oreKey = 'data.ore.' + cancelled.item.oreId;
+      updated = await Save.findOneAndUpdate(
+        { tgId: tg.id },
+        { $inc: { [oreKey]: cancelled.item.qty }, $set: { updatedAt: Date.now() } },
+        { new: true }
+      );
+    } else {
+      updated = await Save.findOneAndUpdate(
+        { tgId: tg.id },
+        { $push: { 'data.inventory': cancelled.item }, $set: { updatedAt: Date.now() } },
+        { new: true }
+      );
+    }
 
-    console.log(`✅ [market] ${tg.id} снял лот ${listingId}`);
-    res.json({ ok: true, item: cancelled.item, inventory: updated.data.inventory });
+    console.log('✅ [market] ' + tg.id + ' снял лот ' + listingId);
+    if (cancelled.item && cancelled.item.isOre) {
+      res.json({ ok: true, item: cancelled.item, ore: updated.data.ore || {} });
+    } else {
+      res.json({ ok: true, item: cancelled.item, inventory: updated.data.inventory });
+    }
   } catch (e) {
     console.error('❌ [market/cancel] error:', e.message);
     res.status(500).json({ ok: false, error: 'server_error' });
@@ -2345,8 +2872,29 @@ app.post('/api/upgrade', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'max_level' });
     }
     
+    // ✅ Вычисляем стоимость PIXR на сервере (синхронизация с клиентом)
+    let pixrCost = 0;
+    if (currentLv >= 20 && currentLv < 30) {
+      pixrCost = 15;
+    } else if (currentLv >= 30 && currentLv < 40) {
+      pixrCost = 30;
+    } else if (currentLv >= 40 && currentLv < 50) {
+      pixrCost = 60;
+    } else if (currentLv >= 50 && currentLv < 60) {
+      pixrCost = 100;
+    } else if (currentLv >= 60) {
+      pixrCost = 100;
+    }
+    
+    // Проверяем PIXR
+    const currentPixr = user.data.pixr || 0;
+    if (currentPixr < pixrCost) {
+      return res.status(400).json({ ok: false, error: 'not_enough_pixr' });
+    }
+    
     const incObj = {
       'data.gold': -cost,
+      'data.pixr': -pixrCost,
     };
     incObj['data.upg.' + upgId] = 1;
     if (stat && bonus) {
@@ -2356,7 +2904,8 @@ app.post('/api/upgrade', async (req, res) => {
     const result = await Save.findOneAndUpdate(
       { 
         tgId: tg.id,
-        'data.gold': { $gte: cost }
+        'data.gold': { $gte: cost },
+        'data.pixr': { $gte: pixrCost }
       },
       {
         $inc: incObj,
@@ -2366,14 +2915,15 @@ app.post('/api/upgrade', async (req, res) => {
     );
     
     if (!result) {
-      return res.status(400).json({ ok: false, error: 'not_enough_gold' });
+      return res.status(400).json({ ok: false, error: 'not_enough_resources' });
     }
     
-    console.log(`✅ [upgrade] ${tg.id} купил ${upgId}, осталось ${result.data.gold}`);
+    console.log(`✅ [upgrade] ${tg.id} купил ${upgId} (уровень ${currentLv+1}), осталось золота: ${result.data.gold}, PIXR: ${result.data.pixr}`);
     
     res.json({
       ok: true,
       gold: result.data.gold || 0,
+      pixr: result.data.pixr || 0,
       upgLevel: (result.data.upg && result.data.upg[upgId]) || 1,
       baseStats: result.data.baseStats || {}
     });
@@ -2403,7 +2953,7 @@ const UPG_DEFS_SRV = [
   { id: 'spd',     stat: 'spd',     bonus: 1    },
   { id: 'atkSpd',  stat: 'atkSpd',  bonus: 0.15 },
   { id: 'crit',    stat: 'crit',    bonus: 3    },
-  { id: 'critDmg', stat: 'critDmg', bonus: 0.1  },
+  { id: 'critDmg', stat: 'critDmg', bonus: 0.15 },
   { id: 'dodge',   stat: 'dodge',   bonus: 2    },
 ];
 
@@ -2453,7 +3003,11 @@ function calcFullStats(data) {
     });
   });
 
-  // 5. Итоговые статы
+  // 5. Итоговые статы + капы предметных бонусов (зеркало equippedStats клиента)
+  bonus.crit    = Math.min(bonus.crit,    10);
+  bonus.dodge   = Math.min(bonus.dodge,   10);
+  bonus.critDmg = Math.min(bonus.critDmg, 0.5);
+
   const stats = {};
   ['atk','def','hp','spd','crit','dodge','atkSpd','critDmg'].forEach(s => {
     stats[s] = (base[s] || 0) + (bonus[s] || 0);
@@ -2464,6 +3018,8 @@ function calcFullStats(data) {
   stats.crit  = Math.floor(stats.crit);
   stats.dodge = Math.floor(stats.dodge);
   stats.atkSpd = parseFloat((stats.atkSpd || 1.0).toFixed(4));
+  // critDmg как множитель (зеркало effectiveCritDmg клиента: 1.8 + stats.critDmg)
+  stats.effectiveCritDmg = parseFloat((1.8 + (stats.critDmg || 0)).toFixed(4));
 
   return stats;
 }
@@ -2658,6 +3214,60 @@ app.post('/api/pvp/history', async (req, res) => {
 });
 
 // ═══════════════════════════════
+//  РЕЙТИНГ ПО ВРЕМЕНИ В ИГРЕ
+// ═══════════════════════════════
+
+// Топ-50 по общему времени (для игроков)
+app.post('/api/playtime/rating', async (req, res) => {
+  const tg = authUser(req, res);
+  if (!tg) return;
+  try {
+    const top = await PlaytimeRating.find(
+      { charId: { $ne: null } },
+      'tgId firstName username charId level totalSeconds todaySeconds lastSeenAt'
+    ).sort({ totalSeconds: -1 }).limit(50).lean();
+
+    const players = top.map(p => ({
+      tgId:         p.tgId,
+      name:         p.firstName || p.username || 'Игрок',
+      charId:       p.charId,
+      level:        p.level || 1,
+      totalSeconds: p.totalSeconds || 0,
+      todaySeconds: p.todaySeconds || 0,
+      lastSeenAt:   p.lastSeenAt || 0,
+    }));
+
+    const myDoc = await PlaytimeRating.findOne({ tgId: tg.id }, 'totalSeconds todaySeconds').lean();
+    res.json({
+      ok: true, players,
+      myTotal: (myDoc && myDoc.totalSeconds) || 0,
+      myToday: (myDoc && myDoc.todaySeconds) || 0,
+      tgId: tg.id,
+    });
+  } catch (e) {
+    console.error('❌ [playtime/rating]', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
+// ── Счётчик сессий при входе в игру ──
+app.post('/api/playtime/session', async (req, res) => {
+  const tg = authUser(req, res);
+  if (!tg) return;
+  try {
+    await PlaytimeRating.findOneAndUpdate(
+      { tgId: tg.id },
+      { $inc: { sessions: 1 }, $set: { lastSeenAt: Date.now(), updatedAt: Date.now() } },
+      { upsert: true, new: false }
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('❌ [playtime/session]', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
+// ═══════════════════════════════
 //  БОТ: внутренний роут для транзакций
 // ═══════════════════════════════
 app.post('/bot/transaction/:txId/:action', async (req, res) => {
@@ -2710,6 +3320,44 @@ app.post('/bot/transaction/:txId/:action', async (req, res) => {
         reason: 'balance_updated',
         gram: result?.data?.gram || 0
       });
+
+      // ── Реферальный бонус: 5% от депозита GRAM рефереру ──
+      if (tx.type === 'deposit' && tx.amount > 0) {
+        try {
+          const depositor = await Save.findOne({ tgId: tx.userId }, 'refBy firstName username').lean();
+          if (depositor && depositor.refBy) {
+            const bonus = Math.round(tx.amount * REF_DEPOSIT_BONUS * 1000) / 1000;
+            if (bonus > 0) {
+              const refUpdatedAt = Date.now();
+              const refResult = await Save.findOneAndUpdate(
+                { tgId: depositor.refBy },
+                {
+                  $inc: { 'data.gram': bonus },
+                  $set: { 'data.updatedAt': refUpdatedAt, updatedAt: refUpdatedAt }
+                },
+                { new: true }
+              );
+              console.log(`🎁 [bot] Реф. бонус ${bonus} GRAM → ${depositor.refBy} (от депозита ${tx.amount} GRAM пользователя ${tx.userId})`);
+              notifyClient(depositor.refBy, 'reload', {
+                reason: 'ref_bonus',
+                gram: refResult?.data?.gram || 0
+              });
+              if (bot) {
+                const depositorName = depositor.firstName || depositor.username || tx.userId;
+                try {
+                  await bot.sendMessage(
+                    depositor.refBy,
+                    `🎁 *Реферальный бонус!*\n\nВаш друг *${depositorName}* пополнил баланс на *${tx.amount} GRAM*\nВы получили *+${bonus} GRAM* (5%) на счёт!`,
+                    { parse_mode: 'Markdown' }
+                  );
+                } catch (e) {}
+              }
+            }
+          }
+        } catch (refErr) {
+          console.error('❌ [bot] Ошибка начисления реф. бонуса:', refErr.message);
+        }
+      }
     }
 
     await logAdminAction('bot', action + '_transaction', tx.userId, { txId, amount: tx.amount });
