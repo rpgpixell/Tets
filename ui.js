@@ -1075,7 +1075,8 @@ function createWithdrawModal() {
 }
 
 function closeWalletModal(e) {
-  if (e && e.target && !e.target.closest('.wallet-modal-content')) return;
+  // Если передано событие — закрываем только при клике ВНЕ контента (по оверлею)
+  if (e && e.target && e.target.closest('.wallet-modal-content')) return;
   document.querySelectorAll('.wallet-modal').forEach(m => m.classList.add('hidden'));
 }
 
@@ -1084,8 +1085,8 @@ function submitDeposit() {
   const amount = parseInt(document.getElementById('depositAmount').value);
   const result = document.getElementById('depositResult');
   
-  if (!amount || amount < 1 || amount > 100) {
-    result.innerHTML = '<span style="color:#e74c3c;">Сумма от 1 до 100 GRAM</span>';
+  if (!amount || amount < 1 || amount > 10000) {
+    result.innerHTML = '<span style="color:#e74c3c;">Сумма от 1 до 10 000 GRAM</span>';
     return;
   }
   
@@ -1380,7 +1381,8 @@ function friendsClaim(btn) {
     if (r.ok && r.goldEarned > 0) {
       G.gold += r.goldEarned;
       updateHUD();
-      if (typeof window.GameSync.touch === 'function') window.GameSync.touch();
+      // FIX #5: touch() удалён — сохраняем изменившееся gold напрямую
+      if (window.GameSync) window.GameSync.saveInstant({ gold: G.gold });
       showFriendsToast('+' + r.goldEarned + ' золота получено!');
       setTimeout(function() { renderFriends(); }, 800);
     } else {
@@ -1968,19 +1970,13 @@ function switchMarketTab(tab) {
 
 // ── Забрать PIXR за проданный лот ──
 function claimListing(listingId, earned) {
-  var API  = window.GameSync._API;
-  var init = window.GameSync._INIT;
-  fetch(API + '/api/market/claim', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData: init, listingId: listingId })
-  })
-  .then(function(r) { return r.json(); })
+  // ✅ FIX #4: используем claimMarketEarnings из net.js — он синхронизирует
+  // G.pixr / SYNC.lastPixr / _instantPending после серверного $inc,
+  // чтобы следующий saveInstant не перетёр начисленный PIXR.
+  window.claimMarketEarnings(listingId)
   .then(function(d) {
     if (d.ok) {
-      G.pixr = d.pixr;
       updateMarketPixrBal();
-      window.GameSync.saveInstant({ pixr: G.pixr });
       _taskToast('✅ Получено: +' + d.earned + ' 💎 PIXR');
       loadMarketListings();
     } else {
@@ -2348,7 +2344,8 @@ function confirmUnlockMarket() {
       G.marketUnlocked = true;
       if (d.pixr !== undefined) G.pixr = d.pixr;
       document.getElementById('marketUnlockModal').classList.add('hidden');
-      window.GameSync.saveInstant();
+      // FIX #3: передаём реальные данные вместо пустого вызова
+      if (window.GameSync) window.GameSync.saveInstant({ marketUnlocked: true, pixr: G.pixr });
       _taskToast('🏪 Маркет открыт!');
       openMarket();
     } else {
@@ -2718,11 +2715,12 @@ function _pvpGetMyName() {
 }
 
 // ── Базовый урон за удар ──
-function _pvpCalcDmg(atk, def, crit) {
+// critDmgMult: для игрока — effectiveCritDmg(), для противника — 1.8 (хардкод, у него нет данных)
+function _pvpCalcDmg(atk, def, crit, critDmgMult) {
   var raw  = Math.max(1, atk - Math.floor(def * 0.5));
   var dmg  = Math.floor(raw * (0.85 + Math.random() * 0.3));
   var isCrit = Math.random() * 100 < crit;
-  if (isCrit) dmg = Math.floor(dmg * 1.8);
+  if (isCrit) dmg = Math.floor(dmg * (critDmgMult || 1.8));
   return { dmg: Math.max(1, dmg), crit: isCrit };
 }
 
@@ -2965,7 +2963,8 @@ function _pvpUpdate(dt) {
     } else {
       var myEffCrit = (b.myCrit || 5) + (b._myCritBuff || 0);
       var oppEffDef = Math.floor((b.oppDef || 5) * (1 - (b._oppDefDebuff || 0)));
-      var res = _pvpCalcDmg(b.myAtk, oppEffDef, myEffCrit);
+      var myEffCritDmg = (typeof effectiveCritDmg === 'function') ? effectiveCritDmg() : 1.8;
+      var res = _pvpCalcDmg(b.myAtk, oppEffDef, myEffCrit, myEffCritDmg);
       b.oppHp = Math.max(0, b.oppHp - res.dmg);
       b.myDmgDealt += res.dmg;
       b.myAnimState = 'atk'; b.myAnimTimer = 0.4;
@@ -3373,23 +3372,13 @@ function _pvpEndBattle() {
   if (_pvpRafId) { cancelAnimationFrame(_pvpRafId); _pvpRafId = null; }
 
   var b = _pvpBattle;
-  // Победитель — кто больше нанёс урона (или у кого HP > 0)
-  var won;
-  if (b.myHp <= 0 && b.oppHp > 0) {
-    won = false;
-  } else if (b.oppHp <= 0 && b.myHp > 0) {
-    won = true;
-  } else {
-    // По нанесённому урону
-    won = b.myDmgDealt >= b.oppDmgDealt;
-  }
 
-  // Тратим попытку локально
+  // Тратим попытку локально (клиентский предпросмотр, сервер подтвердит)
   var today = _pvpTodayStr();
   if ((G.pvpAttemptsDate || '') !== today) { G.pvpAttempts = 0; G.pvpAttemptsDate = today; }
   G.pvpAttempts = (G.pvpAttempts || 0) + 1;
 
-  // Отправляем результат на сервер
+  // Отправляем на сервер — сервер сам симулирует бой и определяет победителя
   var API  = window.GameSync._API;
   var init = window.GameSync._INIT;
   fetch(API + '/api/pvp/result', {
@@ -3398,35 +3387,35 @@ function _pvpEndBattle() {
     body: JSON.stringify({
       initData:   init,
       opponentId: b.opp.tgId,
-      won:        won,
-      myDmg:      Math.floor(b.myDmgDealt),
-      oppDmg:     Math.floor(b.oppDmgDealt),
+      // ✅ won/myDmg/oppDmg убраны — сервер считает сам
     })
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.ok) {
-      G.arenaRating    = d.newRating;
-      G.pvpAttempts    = 10 - (d.attemptsLeft || 0);
+      var serverWon = d.won; // ✅ берём результат от сервера
+      G.arenaRating     = d.newRating;
+      G.pvpAttempts     = 10 - (d.attemptsLeft || 0);
       G.pvpAttemptsDate = today;
       if (window.GameSync) window.GameSync.saveInstant({
         arenaRating: G.arenaRating,
         pvpAttempts: G.pvpAttempts,
         pvpAttemptsDate: G.pvpAttemptsDate,
       });
-      _pvpShowResult(won, d.ratingChange, d.newRating, b.opp.name);
+      _pvpShowResult(serverWon, d.ratingChange, d.newRating, b.opp.name);
       _pvpClearCache();
     } else {
-      // Даже при ошибке сервера — показываем результат локально
+      // При ошибке сервера — показываем нейтральный результат без изменения рейтинга
       if (window.GameSync) window.GameSync.saveInstant({
         pvpAttempts: G.pvpAttempts,
         pvpAttemptsDate: G.pvpAttemptsDate,
       });
-      _pvpShowResult(won, won ? 5 : -5, G.arenaRating, b.opp.name);
+      _pvpShowResult(false, 0, G.arenaRating, b.opp.name);
     }
   })
   .catch(function() {
-    _pvpShowResult(won, won ? 5 : -5, G.arenaRating, b.opp.name);
+    // Нет сети — показываем без изменения рейтинга
+    _pvpShowResult(false, 0, G.arenaRating, b.opp.name);
   });
 }
 
@@ -3775,7 +3764,10 @@ function doCraft(recipeId) {
   if (!success) {
     // Провал — ресурсы сгорели
     updateHUD();
-    if (typeof saveNow === 'function') saveNow();
+    // FIX #4: saveNow не существует — используем saveInstant
+    if (window.GameSync) window.GameSync.saveInstant({
+      ore: G.ore, runes: G.runes, blessStones: G.blessStones, pixr: G.pixr,
+    });
     renderCraft();
     _showCraftMsg(false, 'Провал! Ресурсы сгорели.');
     return;
@@ -3788,7 +3780,10 @@ function doCraft(recipeId) {
     G.runes[recipe.result.runeId] = (G.runes[recipe.result.runeId] || 0) + recipe.result.qty;
   }
   updateHUD();
-  if (typeof saveNow === 'function') saveNow();
+  // FIX #4: saveNow не существует — используем saveInstant
+  if (window.GameSync) window.GameSync.saveInstant({
+    ore: G.ore, runes: G.runes, blessStones: G.blessStones, pixr: G.pixr,
+  });
   renderCraft();
   _showCraftMsg(true, recipe.name + ' ×' + recipe.result.qty + ' готово!');
 }
@@ -3962,7 +3957,11 @@ function doInsertRune(itemId, runeTypeId) {
 
   _runeSelectedItem = null;
   updateHUD();
-  if (typeof saveNow === 'function') saveNow();
+  // FIX #4: saveNow не существует — используем saveInstant
+  if (window.GameSync) window.GameSync.saveInstant({
+    pixr: G.pixr, runes: G.runes,
+    equipped: G.equipped, inventory: (G.inventory||[]).map(function(i){var c=Object.assign({},i);delete c._equipped;return c;}),
+  });
   renderRune();
 
   var statTxt = Object.keys(runeStats).map(function(s) { return '+' + runeStats[s] + ' ' + s.toUpperCase(); }).join(', ');

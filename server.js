@@ -15,7 +15,14 @@ const crypto   = require('crypto');
 const path     = require('path');
 
 // ── Telegram Bot ──
-const TelegramBot = require('node-telegram-bot-api');
+
+const { initBot, getBot }     = require('./bot');
+const { registerAdminRoutes } = require('./admin');
+
+// ── BOT_TOKEN (нужен для верификации запросов от бота) ──
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+if (!BOT_TOKEN) console.warn('⚠️  BOT_TOKEN не задан — /bot/transaction не будет работать');
+
 
 const http = require('http');
 
@@ -448,7 +455,7 @@ app.post('/api/load', async (req, res) => {
       });
       console.log(`🆕 [load] Новый пользователь: ${tg.id}`);
 
-      if (bot && process.env.ADMIN_TG_ID) {
+      if (getBot() && process.env.ADMIN_TG_ID) {
         try {
           let inviterName = '— (органика)';
           if (refBy) {
@@ -467,7 +474,7 @@ app.post('/api/load', async (req, res) => {
             '*Username:* ' + (tg.username ? '@' + tg.username : '—') + '\n' +
             '*ID:* `' + tg.id + '`\n' +
             '*Пригласил:* ' + inviterName;
-          await bot.sendMessage(process.env.ADMIN_TG_ID, newUserMsg, { parse_mode: 'Markdown' });
+          await getBot()?.sendMessage(process.env.ADMIN_TG_ID, newUserMsg, { parse_mode: 'Markdown' });
         } catch (e) {
           console.error('❌ [load] Ошибка уведомления о новом пользователе:', e.message);
         }
@@ -587,14 +594,16 @@ app.post('/api/save', async (req, res) => {
       if (!ptDoc) {
         // Первая запись: totalSeconds = сегодняшние секунды
         // (прошлые дни не восстановить, но хотя бы не теряем сегодня)
+        // Защита: не более 86400 секунд (1 сутки) в первой записи
+        const safeTodaySeconds = Math.min(clientTodaySeconds, 86400);
         await PlaytimeRating.create({
           tgId:         tg.id,
           username:     tg.username,
           firstName:    tg.firstName,
           charId:       data.charId || null,
           level:        Number(data.level) || 1,
-          totalSeconds: clientTodaySeconds,
-          todaySeconds: clientTodaySeconds,
+          totalSeconds: safeTodaySeconds,
+          todaySeconds: safeTodaySeconds,
           todayDate:    todayStr,
           sessions:     0,
           lastSeenAt:   data.updatedAt,
@@ -605,11 +614,15 @@ app.post('/api/save', async (req, res) => {
         const prevTodaySeconds = isSameDay ? (ptDoc.todaySeconds || 0) : 0;
 
         // Сколько новых секунд появилось за этот save
-        const todayDelta = Math.max(0, clientTodaySeconds - prevTodaySeconds);
+        const rawDelta = Math.max(0, clientTodaySeconds - prevTodaySeconds);
+        // Защита от накрутки: дельта не может быть больше времени между сохранениями + 60с буфер
+        const timeSinceLastSave = Math.max(0, Math.floor((data.updatedAt - (ptDoc.lastSeenAt || 0)) / 1000));
+        const MAX_DELTA = Math.min(rawDelta, timeSinceLastSave + 60);
+        const todayDelta = isSameDay ? MAX_DELTA : Math.min(clientTodaySeconds, 86400);
 
         // Если день сменился — старые todaySeconds уже вошли в total в прошлый раз,
         // поэтому прибавляем только новые секунды нового дня
-        const totalDelta = isSameDay ? todayDelta : clientTodaySeconds;
+        const totalDelta = isSameDay ? todayDelta : Math.min(clientTodaySeconds, 86400);
 
         await PlaytimeRating.findOneAndUpdate(
           { tgId: tg.id },
@@ -643,7 +656,6 @@ app.post('/api/save', async (req, res) => {
     res.status(500).json({ 
       ok: false, 
       error: 'server_error',
-      message: e.message
     });
   }
 });
@@ -682,6 +694,14 @@ app.post('/api/save/delta', async (req, res) => {
     const clientUpdatedAt = delta.updatedAt || 0;
     const serverUpdatedAt = srv.updatedAt || 0;
 
+    // ✅ FIX #1: Проверка сброса прогресса — зеркало /api/save
+    const resetAt = srv._resetAt || 0;
+    if (resetAt > clientUpdatedAt) {
+      console.log(`🛑 [delta] Блок после сброса для ${tg.id}: resetAt=${resetAt} > clientAt=${clientUpdatedAt}`);
+      notifyClient(tg.id, 'force_close', { reason: 'progress_reset' });
+      return res.json({ ok: false, error: 'reset_detected', updatedAt: serverUpdatedAt, resetAt });
+    }
+
     // Если сервер свежее клиента — игнорируем дельту
     if (serverUpdatedAt > clientUpdatedAt) {
       console.log(`⚠️ [delta] Игнорируем устаревшую дельту для ${tg.id}`);
@@ -690,9 +710,20 @@ app.post('/api/save/delta', async (req, res) => {
 
     // ✅ Мёржим дельту с текущими данными
     const merged = Object.assign({}, srv);
+    // Батч-поля (hp/gold/xp меняются в игровом цикле)
+    // + Instant-поля (inventory/equipped/upg/... меняются по действию игрока)
+    // saveInstant теперь тоже идёт через /api/save/delta — оба типа нужны здесь
     const ALLOWED_DELTA_FIELDS = [
+      // батч
       'hp', 'gold', 'xp', 'xpNeeded', 'killCount', 'potions',
-      'level', 'floor', 'maxFloor', 'pixr', 'cp', 'charId'
+      'level', 'floor', 'maxFloor', 'pixr', 'cp', 'charId', 'dailyTasks',
+      // instant (структурные изменения)
+      'inventory', 'equipped', 'upg', 'skills',
+      'potionLv', 'potionThreshold', 'gram', 'bp', 'prem', 'boss',
+      'marketUnlocked', 'arenaRating',
+      'ore', 'blessStones', 'runes',
+      'pvpAttempts', 'pvpAttemptsDate', 'pvpRefreshes', 'pvpRefreshDate',
+      'invFilter', 'invIdCounter', 'specialTasksClaimed',
     ];
     ALLOWED_DELTA_FIELDS.forEach(function(field) {
       if (delta[field] !== undefined) merged[field] = delta[field];
@@ -747,6 +778,12 @@ app.post('/api/character', async (req, res) => {
   const charId = req.body && req.body.charId;
   if (!charId) {
     return res.status(400).json({ ok: false, error: 'bad_char' });
+  }
+
+  // ✅ Валидация charId — допустимы только известные классы
+  const VALID_CHAR_IDS = ['fire', 'light', 'water'];
+  if (!VALID_CHAR_IDS.includes(charId)) {
+    return res.status(400).json({ ok: false, error: 'invalid_char' });
   }
   
   console.log(`🎭 [character] tgId: ${tg.id}, charId: ${charId}`);
@@ -862,18 +899,19 @@ app.post('/api/ref/claim', async (req, res) => {
     const { gold, newMilestones } = calcPendingGold(doc.refMilestones || {}, friends);
     if (gold === 0) return res.json({ ok: true, goldEarned: 0 });
 
-    if (!doc.data) doc.data = { tgId: tg.id };
-    doc.data.tgId = tg.id;
-    doc.data.gold = (doc.data.gold || 0) + gold;
-
+    // ✅ FIX #5: Атомарный $inc вместо read-modify-write.
+    // Также обновляем data.updatedAt чтобы клиентский saveInstant
+    // не перезаписал начисленное золото устаревшим значением.
+    const now = Date.now();
     await Save.findOneAndUpdate(
       { tgId: tg.id, refClaimVer: doc.refClaimVer || 0 },
-      { 
-        $set: { 
-          refMilestones: newMilestones, 
-          data: doc.data 
-        }, 
-        $inc: { refClaimVer: 1 } 
+      {
+        $inc: { 'data.gold': gold, refClaimVer: 1 },
+        $set: {
+          refMilestones: newMilestones,
+          'data.updatedAt': now,
+          updatedAt: now,
+        }
       }
     );
 
@@ -921,11 +959,17 @@ app.post('/api/tasks', async (req, res) => {
 app.post('/api/tasks/daily/claim', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
+
+  // ✅ Rate limit: не более 10 за 60 секунд
+  if (rateLimit(tg.id + '_taskclaim', 10, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
+
   const { milestoneId } = req.body;
   const milestone = DAILY_MILESTONES.find(m => m.id === milestoneId);
   if (!milestone) return res.status(400).json({ ok: false, error: 'invalid_milestone' });
   try {
-    const user = await Save.findOne({ tgId: tg.id });
+    const user = await Save.findOne({ tgId: tg.id }).lean();
     if (!user || !user.data) return res.status(404).json({ ok: false, error: 'no_save' });
     const daily    = user.data.dailyTasks || { date: '', seconds: 0, claimed: [] };
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -936,11 +980,24 @@ app.post('/api/tasks/daily/claim', async (req, res) => {
     if (Math.floor((daily.seconds || 0) / 60) < milestone.minutes)
       return res.status(400).json({ ok: false, error: 'not_enough_time' });
     const rewardField = 'data.' + milestone.rewardType;
-    const newClaimed  = [...(daily.claimed || []), milestoneId];
-    await Save.findOneAndUpdate(
-      { tgId: tg.id },
-      { $inc: { [rewardField]: milestone.amount }, $set: { 'data.dailyTasks.claimed': newClaimed } }
+    const now = Date.now();
+
+    // ✅ Атомарная защита от двойного клэйма: $addToSet гарантирует уникальность
+    // Условие на дату и отсутствие milestoneId в claimed предотвращает race condition
+    const result = await Save.findOneAndUpdate(
+      {
+        tgId: tg.id,
+        'data.dailyTasks.date': todayStr,
+        'data.dailyTasks.claimed': { $not: { $elemMatch: { $eq: milestoneId } } },
+      },
+      {
+        $inc: { [rewardField]: milestone.amount },
+        $addToSet: { 'data.dailyTasks.claimed': milestoneId },
+        $set: { 'data.updatedAt': now, updatedAt: now }
+      },
+      { new: true }
     );
+    if (!result) return res.status(400).json({ ok: false, error: 'already_claimed' });
     res.json({ ok: true, reward: { type: milestone.rewardType, amount: milestone.amount } });
   } catch (e) {
     console.error('❌ [tasks/daily/claim] error:', e.message);
@@ -951,26 +1008,274 @@ app.post('/api/tasks/daily/claim', async (req, res) => {
 app.post('/api/tasks/special/claim', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
+
+  // ✅ Rate limit: не более 10 за 60 секунд
+  if (rateLimit(tg.id + '_taskclaim', 10, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
+
   const { taskId } = req.body;
   if (!taskId) return res.status(400).json({ ok: false, error: 'missing_taskId' });
   try {
     const [task, user] = await Promise.all([
       SpecialTask.findOne({ taskId, active: true }).lean(),
-      Save.findOne({ tgId: tg.id })
+      Save.findOne({ tgId: tg.id }).lean()
     ]);
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
     if (!user)  return res.status(404).json({ ok: false, error: 'no_save' });
     const claimed = (user.data && user.data.specialTasksClaimed) || {};
     if (claimed[taskId]) return res.status(400).json({ ok: false, error: 'already_claimed' });
-    const rewardField  = 'data.' + task.rewardType;
-    const newClaimed   = Object.assign({}, claimed, { [taskId]: Date.now() });
-    await Save.findOneAndUpdate(
-      { tgId: tg.id },
-      { $inc: { [rewardField]: task.rewardAmount }, $set: { 'data.specialTasksClaimed': newClaimed } }
+    const rewardField = 'data.' + task.rewardType;
+    const now = Date.now();
+
+    // ✅ Атомарная защита от двойного клэйма: $exists: false исключает race condition
+    const result = await Save.findOneAndUpdate(
+      {
+        tgId: tg.id,
+        [`data.specialTasksClaimed.${taskId}`]: { $exists: false },
+      },
+      {
+        $inc: { [rewardField]: task.rewardAmount },
+        $set: {
+          [`data.specialTasksClaimed.${taskId}`]: now,
+          'data.updatedAt': now,
+          updatedAt: now,
+        }
+      },
+      { new: true }
     );
+    if (!result) return res.status(400).json({ ok: false, error: 'already_claimed' });
     res.json({ ok: true, reward: { type: task.rewardType, amount: task.rewardAmount } });
   } catch (e) {
     console.error('❌ [tasks/special/claim] error:', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+// ═══════════════════════════════
+
+// Зеркало констант из data.js / inventory.js
+const SRV_ITEM_TYPES = [
+  { slot: 'body',   name: 'Нагрудник', stats: ['def', 'hp'],    primary: 'def'  },
+  { slot: 'legs',   name: 'Штаны',     stats: ['def', 'dodge'], primary: 'def'  },
+  { slot: 'gloves', name: 'Перчатки',  stats: ['atk', 'def'],   primary: 'atk'  },
+  { slot: 'boots',  name: 'Боты',      stats: ['spd', 'dodge'], primary: 'spd'  },
+  { slot: 'helmet', name: 'Шлем',      stats: ['def', 'hp'],    primary: 'def'  },
+  { slot: 'ring',   name: 'Кольцо',    stats: ['atk', 'spd'],   primary: 'atk'  },
+  { slot: 'belt',   name: 'Пояс',      stats: ['hp', 'def'],    primary: 'hp'   },
+];
+const SRV_STAFF_TYPES = [
+  { slot: 'weapon', name: 'Посох огня',  stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'fire',  classLabel: 'Пирокан', classColor: '#ff7030' },
+  { slot: 'weapon', name: 'Посох света', stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'light', classLabel: 'Люмос',   classColor: '#ffd040' },
+  { slot: 'weapon', name: 'Посох воды',  stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'water', classLabel: 'Аквас',   classColor: '#40d0ff' },
+];
+const SRV_RARITIES = [
+  { id: 'common',   weight: 55 },
+  { id: 'uncommon', weight: 28 },
+  { id: 'rare',     weight: 12 },
+  { id: 'epic',     weight:  4 },
+  { id: 'legend',   weight:  1 },
+];
+const SRV_FLOOR_MAX_RARITY = { 1:'common', 2:'uncommon', 3:'uncommon', 4:'rare', 5:'rare', 6:'rare', 7:'epic', 8:'epic', 9:'legend', 10:'legend' };
+const SRV_FLOOR_MIN_RARITY = { 1:'common', 2:'common',   3:'common',   4:'common', 5:'common', 6:'common', 7:'common', 8:'uncommon', 9:'uncommon', 10:'uncommon' };
+const SRV_CRITDMG_BY_RARITY = { common: 0.05, uncommon: 0.08, rare: 0.12, epic: 0.18, legend: 0.25 };
+const SRV_STAT_CAP = { crit: 5, dodge: 5 };
+
+function srvItemIcon(slot, rarity, forClass) {
+  const sfx = { common:'c', uncommon:'u', rare:'r', epic:'e', legend:'l' }[rarity] || 'c';
+  if (slot === 'weapon') {
+    const pfx = { water:'ww', fire:'wf', light:'wl' }[forClass] || 'ww';
+    return 'images/' + pfx + sfx + '.png';
+  }
+  const slotPfx = { body:'a', legs:'l', gloves:'p', boots:'b', helmet:'h', ring:'ring', belt:'belt' }[slot];
+  return slotPfx ? 'images/' + slotPfx + sfx + '.png' : 'images/ac.png';
+}
+
+function srvRollRarity(floor) {
+  const rarityOrder = ['common','uncommon','rare','epic','legend'];
+  const maxIdx = rarityOrder.indexOf(SRV_FLOOR_MAX_RARITY[floor] || 'legend');
+  const minIdx = rarityOrder.indexOf(SRV_FLOOR_MIN_RARITY[floor] || 'common');
+  const bonus = (floor - 1) * 0.3;
+  const weights = SRV_RARITIES.map((r, i) => {
+    if (i > maxIdx || i < minIdx) return 0;
+    return Math.max(0.1, r.weight - i * bonus * 0.8 + (i > 1 ? bonus * i * 0.5 : 0));
+  });
+  const total = weights.reduce((a, b) => a + b, 0);
+  let roll = Math.random() * total, cum = 0;
+  for (let i = 0; i < SRV_RARITIES.length; i++) {
+    if (weights[i] === 0) continue;
+    cum += weights[i];
+    if (roll <= cum) return SRV_RARITIES[i].id;
+  }
+  return SRV_RARITIES[minIdx].id;
+}
+
+function srvGenerateItem(floor) {
+  const rarity  = srvRollRarity(floor);
+  const rarIdx  = ['common','uncommon','rare','epic','legend'].indexOf(rarity);
+  const mult    = 1 + rarIdx * 0.55;
+  const itemLv  = Math.max(1, floor * 2 + Math.floor(Math.random() * 3) - 1);
+  const base    = itemLv * 2.5;
+
+  let type;
+  if (Math.random() < 0.25) {
+    type = SRV_STAFF_TYPES[Math.floor(Math.random() * SRV_STAFF_TYPES.length)];
+  } else {
+    type = SRV_ITEM_TYPES[Math.floor(Math.random() * SRV_ITEM_TYPES.length)];
+  }
+
+  const stats = {};
+  type.stats.forEach(s => {
+    if (s === 'critDmg') {
+      const cdVal = parseFloat(((SRV_CRITDMG_BY_RARITY[rarity] || 0.05) * (0.85 + Math.random() * 0.3)).toFixed(2));
+      if (cdVal > 0) stats[s] = cdVal;
+      return;
+    }
+    const isPrimary = (s === type.primary);
+    let val = Math.floor(base * mult * (isPrimary ? 1.0 : 0.45) * (0.85 + Math.random() * 0.3));
+    if (SRV_STAT_CAP[s] !== undefined) val = Math.min(val, SRV_STAT_CAP[s]);
+    if (val > 0) stats[s] = val;
+  });
+  // Легендарный — дополнительный стат
+  if (rarity === 'legend') {
+    const bonus = ['atk','def','hp','spd'].filter(s => !stats[s]);
+    if (bonus.length) stats[bonus[Math.floor(Math.random() * bonus.length)]] = Math.floor(base * 0.5);
+  }
+
+  return {
+    id: Date.now() + Math.floor(Math.random() * 1000000),
+    slot: type.slot,
+    name: type.name,
+    icon: srvItemIcon(type.slot, rarity, type.forClass || null),
+    rarity, level: itemLv, stats,
+    forClass:   type.forClass   || null,
+    classLabel: type.classLabel || null,
+    classColor: type.classColor || null,
+    _equipped: false,
+  };
+}
+
+// ── Дроп предмета с монстра ──
+app.post('/api/drop', async (req, res) => {
+  const tg = authUser(req, res);
+  if (!tg) return;
+
+  // ✅ Rate limit: не более 30 дропов за 60 секунд
+  if (rateLimit(tg.id + '_drop', 30, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
+
+  const reqFloor = Math.max(1, Math.min(10, parseInt(req.body && req.body.floor) || 1));
+
+  try {
+    const user = await Save.findOne({ tgId: tg.id }).lean();
+    if (!user || !user.data) return res.status(404).json({ ok: false, error: 'no_save' });
+
+    // ✅ Проверяем что запрошенный этаж не превышает maxFloor игрока
+    const playerMaxFloor = Math.max(1, Math.min(10, user.data.maxFloor || user.data.floor || 1));
+    const floor = Math.min(reqFloor, playerMaxFloor);
+
+    const inventory = user.data.inventory || [];
+    if (inventory.length >= 40) return res.json({ ok: false, error: 'inv_full' });
+
+    const item = srvGenerateItem(floor);
+
+    const now = Date.now();
+    const updated = await Save.findOneAndUpdate(
+      { tgId: tg.id },
+      {
+        $push: { 'data.inventory': item },
+        $set:  { 'data.updatedAt': now, updatedAt: now },
+      },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ ok: false, error: 'no_save' });
+
+    console.log(`🎁 [drop] ${tg.id} floor=${floor} item="${item.name}" rarity=${item.rarity}`);
+    res.json({ ok: true, item, inventory: updated.data.inventory });
+  } catch (e) {
+    console.error('❌ [drop] error:', e.message);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
+// ── Дроп руды с монстра ──
+const SRV_ORE_NAMES = { core:'Обычная руда', uore:'Необычная руда', rore:'Редкая руда', eore:'Эпическая руда', lore:'Легендарная руда' };
+const SRV_VALID_ORES = ['core','uore','rore','eore','lore'];
+const DROP_ORE_MAX_QTY_PER_TYPE = 3; // клиент присылает 1-3, не больше
+const DROP_ORE_MAX_TYPES = 5;        // не больше 5 типов за раз
+
+app.post('/api/drop/ore', async (req, res) => {
+  const tg = authUser(req, res);
+  if (!tg) return;
+
+  // ✅ Rate limit: не более 30 дропов за 60 секунд
+  if (rateLimit(tg.id + '_drop', 30, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
+
+  const reqFloor   = Math.max(1, Math.min(10, parseInt(req.body && req.body.floor) || 1));
+  const clientOres = (req.body && req.body.ores) || {};
+
+  try {
+    // ✅ Проверяем maxFloor игрока перед обработкой руды
+    const userDoc = await Save.findOne({ tgId: tg.id }, 'data.maxFloor data.floor').lean();
+    const playerMaxFloor = userDoc && userDoc.data ? Math.max(1, Math.min(10, userDoc.data.maxFloor || userDoc.data.floor || 1)) : 1;
+    const floor = Math.min(reqFloor, playerMaxFloor);
+
+    // Валидируем и очищаем то что прислал клиент
+    const ores = {};
+    let typeCount = 0;
+    for (const oreId of SRV_VALID_ORES) {
+      if (!clientOres[oreId]) continue;
+      if (typeCount >= DROP_ORE_MAX_TYPES) break;
+      const qty = Math.min(Math.max(1, parseInt(clientOres[oreId]) || 0), DROP_ORE_MAX_QTY_PER_TYPE);
+      if (qty > 0) { ores[oreId] = qty; typeCount++; }
+    }
+
+    if (Object.keys(ores).length === 0) {
+      return res.json({ ok: false, error: 'no_ores' });
+    }
+
+    // Проверяем что шансы дропа соответствуют этажу — защита от накрутки
+    // (lore на 1-7 этаже не может выпасть)
+    const ORE_DROP_TABLE_SRV = {
+      1:  { core:2,   uore:0,   rore:0,   eore:0,   lore:0   },
+      2:  { core:3,   uore:1.5, rore:0,   eore:0,   lore:0   },
+      3:  { core:4,   uore:2.5, rore:0,   eore:0,   lore:0   },
+      4:  { core:4,   uore:3,   rore:1,   eore:0,   lore:0   },
+      5:  { core:4,   uore:3.5, rore:2,   eore:0,   lore:0   },
+      6:  { core:4,   uore:4,   rore:2.5, eore:0.5, lore:0   },
+      7:  { core:4,   uore:4,   rore:3,   eore:1,   lore:0   },
+      8:  { core:4,   uore:4,   rore:3.5, eore:1.5, lore:0.2 },
+      9:  { core:4,   uore:4,   rore:4,   eore:2,   lore:0.4 },
+      10: { core:4,   uore:4,   rore:4,   eore:2.5, lore:0.6 },
+    };
+    const table = ORE_DROP_TABLE_SRV[floor] || ORE_DROP_TABLE_SRV[10];
+    for (const oreId of Object.keys(ores)) {
+      if ((table[oreId] || 0) <= 0) {
+        delete ores[oreId];
+      }
+    }
+    if (Object.keys(ores).length === 0) {
+      return res.json({ ok: false, error: 'invalid_ores_for_floor' });
+    }
+
+    const incUpdate = {};
+    for (const [oreId, qty] of Object.entries(ores)) {
+      incUpdate['data.ore.' + oreId] = qty;
+    }
+    const now = Date.now();
+    const updated = await Save.findOneAndUpdate(
+      { tgId: tg.id },
+      { $inc: incUpdate, $set: { 'data.updatedAt': now, updatedAt: now } },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ ok: false, error: 'no_save' });
+
+    console.log(`⛏️ [drop/ore] ${tg.id} floor=${floor} ores=${JSON.stringify(ores)}`);
+    res.json({ ok: true, ore: updated.data.ore || {} });
+  } catch (e) {
+    console.error('❌ [drop/ore] error:', e.message);
     res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
@@ -980,6 +1285,12 @@ app.post('/api/tasks/special/claim', async (req, res) => {
 // ═══════════════════════════════
 const _avatarCache = new Map();
 const AVATAR_CACHE_TTL = 3600 * 1000;
+
+// ── Периодическая очистка avatar-кэша (утечка памяти) ──
+setInterval(() => {
+  const cutoff = Date.now() - AVATAR_CACHE_TTL;
+  _avatarCache.forEach((v, k) => { if (v.ts < cutoff) _avatarCache.delete(k); });
+}, AVATAR_CACHE_TTL);
 
 app.get('/api/avatar/:tgId', async (req, res) => {
   const tgId = req.params.tgId;
@@ -1034,13 +1345,18 @@ app.get('/api/avatar/:tgId', async (req, res) => {
 app.post('/api/wallet/deposit', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
-  
+
+  // ✅ Rate limit: не более 5 запросов за 60 секунд
+  if (rateLimit(tg.id + '_deposit', 5, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
+
   const { amount } = req.body;
   
-  if (!amount || amount < WALLET_CONFIG.minAmount) {
+  if (!amount || amount < WALLET_CONFIG.minAmount || amount > 10000) {
     return res.status(400).json({ 
       ok: false, 
-      error: `Минимальная сумма ${WALLET_CONFIG.minAmount} GRAM` 
+      error: `Сумма должна быть от ${WALLET_CONFIG.minAmount} до 10000 GRAM` 
     });
   }
   
@@ -1060,7 +1376,7 @@ app.post('/api/wallet/deposit', async (req, res) => {
       createdAt: Date.now()
     });
     
-    if (bot) {
+    if (getBot()) {
       const adminMsg = `
 💰 **НОВАЯ ТРАНЗАКЦИЯ**
 
@@ -1075,7 +1391,7 @@ app.post('/api/wallet/deposit', async (req, res) => {
       
       if (process.env.ADMIN_TG_ID) {
         try {
-          await bot.sendMessage(process.env.ADMIN_TG_ID, adminMsg, {
+          await getBot()?.sendMessage(process.env.ADMIN_TG_ID, adminMsg, {
             parse_mode: 'Markdown',
             reply_markup: {
               inline_keyboard: [
@@ -1112,7 +1428,12 @@ app.post('/api/wallet/deposit', async (req, res) => {
 app.post('/api/wallet/withdraw', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
-  
+
+  // ✅ Rate limit: не более 5 запросов за 60 секунд
+  if (rateLimit(tg.id + '_withdraw', 5, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
+
   const { amount, wallet } = req.body;
   
   if (!amount || amount < WALLET_CONFIG.minAmount) {
@@ -1124,6 +1445,11 @@ app.post('/api/wallet/withdraw', async (req, res) => {
   
   if (!wallet || wallet.length < 10) {
     return res.status(400).json({ ok: false, error: 'Укажите корректный адрес кошелька' });
+  }
+
+  // ✅ Базовая валидация TON-адреса: допустимы только base64url и bounceable форматы
+  if (!/^[A-Za-z0-9_\-+=/]{32,100}$/.test(wallet)) {
+    return res.status(400).json({ ok: false, error: 'Некорректный формат адреса кошелька' });
   }
   
   try {
@@ -1151,7 +1477,7 @@ app.post('/api/wallet/withdraw', async (req, res) => {
       createdAt: Date.now()
     });
     
-    if (bot && process.env.ADMIN_TG_ID) {
+    if (getBot() && process.env.ADMIN_TG_ID) {
       const adminMsg = `
 💰 **НОВАЯ ТРАНЗАКЦИЯ**
 
@@ -1164,7 +1490,7 @@ app.post('/api/wallet/withdraw', async (req, res) => {
       `;
       
       try {
-        await bot.sendMessage(process.env.ADMIN_TG_ID, adminMsg, {
+        await getBot()?.sendMessage(process.env.ADMIN_TG_ID, adminMsg, {
           parse_mode: 'Markdown',
           reply_markup: {
             inline_keyboard: [
@@ -1213,7 +1539,7 @@ app.post('/api/wallet/transactions', async (req, res) => {
     res.json({ ok: true, transactions: txs });
   } catch (e) {
     console.error('❌ [wallet] transactions error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
+    res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
 
@@ -1221,6 +1547,11 @@ app.post('/api/wallet/transactions', async (req, res) => {
 app.post('/api/wallet/exchange', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
+
+  // ✅ Rate limit: не более 10 обменов за 60 секунд
+  if (rateLimit(tg.id + '_exchange', 10, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
 
   const { amount } = req.body;
   if (!amount || amount < 1 || !Number.isInteger(amount)) {
@@ -1290,6 +1621,11 @@ app.post('/api/wallet/exchange-gram', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
 
+  // ✅ Rate limit: не более 10 обменов за 60 секунд
+  if (rateLimit(tg.id + '_exchange', 10, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
+
   const { amount } = req.body; // amount в GRAM (целое число)
   if (!amount || amount < 1 || !Number.isInteger(amount)) {
     return res.status(400).json({ ok: false, error: 'Минимум 1 GRAM для обмена' });
@@ -1333,1051 +1669,6 @@ app.get('/api/wallet/exchange-stats', async (req, res) => {
     res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
-
-// ═══════════════════════════════
-//  БОТ: ВСТРОЕННЫЙ
-// ═══════════════════════════════
-
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const WEBAPP_URL = process.env.WEBAPP_URL || 'https://your-domain.railway.app';
-const API_URL = process.env.API_URL || 'https://tets-production-4fdc.up.railway.app/';
-
-let bot = null;
-
-function initBot() {
-  if (!BOT_TOKEN) {
-    console.error('❌ [bot] BOT_TOKEN не задан!');
-    return null;
-  }
-
-  try {
-    bot = new TelegramBot(BOT_TOKEN, { polling: false });
-
-    const webhookUrl = (process.env.WEBHOOK_URL || API_URL) + '/webhook/' + BOT_TOKEN;
-    
-    bot.setWebHook(webhookUrl)
-      .then(() => {
-        console.log('✅ [bot] Webhook установлен: ' + webhookUrl.replace(BOT_TOKEN, '<TOKEN>'));
-      })
-      .catch((err) => {
-        console.error('❌ [bot] Ошибка установки webhook:', err.message);
-      });
-
-    // ── Webhook маршрут ──
-    app.post('/webhook/' + BOT_TOKEN, (req, res) => {
-      try {
-        bot.processUpdate(req.body);
-      } catch (e) {
-        console.error('❌ [bot] processUpdate error:', e.message);
-      }
-      res.sendStatus(200);
-    });
-
-    // ── /start ──
-    bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
-      try {
-        const chatId = msg.chat.id;
-        const userId = msg.from.id;
-        const username = msg.from.username || msg.from.first_name || 'Игрок';
-        const startParam = (match && match[1]) ? match[1].trim() : null;
-
-        console.log('📨 [bot] /start от ' + username + ' (' + userId + '), param: ' + (startParam || 'none'));
-
-        let webappUrl = WEBAPP_URL;
-        if (startParam) {
-          webappUrl = webappUrl + '?startapp=' + startParam;
-        }
-
-        const hour = new Date().getHours();
-        let greeting = 'Добрый день';
-        if (hour < 12) greeting = '🌅 Доброе утро';
-        else if (hour < 18) greeting = '☀️ Добрый день';
-        else if (hour < 22) greeting = '🌇 Добрый вечер';
-        else greeting = '🌙 Доброй ночи';
-
-        const message =
-          greeting + ', *' + username + '*! 👋\n\n' +
-          '🔥 **PIXEL RPG** — эпическая RPG!\n\n' +
-          '━━━━━━━━━━━━━━━━━━━\n' +
-          '🎮 **В игре тебя ждут:**\n' +
-          '  ✦ 10 этажей с монстрами\n' +
-          '  ✦ 3 класса персонажей\n' +
-          '  ✦ Улучшения и навыки\n' +
-          '  ✦ Редкие предметы\n' +
-          '  ✦ Боевой пропуск\n' +
-          '  ✦ Реферальная система\n\n' +
-          '━━━━━━━━━━━━━━━━━━━\n' +
-          '👤 **Твой ID:** `' + userId + '`\n' +
-          (startParam ? '🔗 **Пригласил:** `' + startParam + '`\n' : '') +
-          '\nНажми на кнопку ниже, чтобы начать!';
-
-        bot.sendMessage(chatId, message, {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🎮 ИГРАТЬ', web_app: { url: webappUrl } }],
-              [
-                { text: '👥 Пригласить друзей', callback_data: 'ref' },
-                { text: '📊 Статистика', callback_data: 'profile' }
-              ]
-            ]
-          }
-        });
-      } catch (e) {
-        console.error('❌ [bot] Ошибка в /start:', e.message);
-      }
-    });
-
-    // ── /help ──
-    bot.onText(/\/help/, (msg) => {
-      bot.sendMessage(msg.chat.id,
-        '📖 **Команды:**\n\n' +
-        '/start — Начать игру\n' +
-        '/help — Справка\n' +
-        '/ref — Реферальная ссылка\n' +
-        '/profile — Мой профиль',
-        { parse_mode: 'Markdown' }
-      );
-    });
-
-    // ── /ref ──
-bot.onText(/\/ref/, (msg) => {
-  const userId = msg.from.id;
-  const refLink = 'https://t.me/' + BOT_USERNAME + '?start=' + userId;
-  bot.sendMessage(msg.chat.id,
-    '👥 **Твоя реферальная ссылка:**\n\n' +
-    '`' + refLink + '`',
-    { parse_mode: 'Markdown' }
-  );
-});
-
-    // ── /profile ──
-    bot.onText(/\/profile/, (msg) => {
-      const userId = msg.from.id;
-      getPlayerProfile(userId).then((profile) => {
-        bot.sendMessage(msg.chat.id,
-          '📊 **Твой профиль:**\n\n' +
-          '👤 Имя: ' + profile.username + '\n' +
-          '🎯 Уровень: ' + profile.level + '\n' +
-          '⚔️ CP: ' + profile.cp + '\n' +
-          '🏰 Этаж: ' + profile.floor + '\n' +
-          '👾 Убийств: ' + profile.killCount + '\n' +
-          '🪙 Золото: ' + profile.gold + '\n' +
-          '💎 PIXR: ' + profile.pixr + '\n' +
-          '⭐ GRAM: ' + profile.gram,
-          { parse_mode: 'Markdown' }
-        );
-      });
-    });
-
-    // ═══════════════════════════════
-    //  ОБРАБОТКА ТРАНЗАКЦИЙ
-    // ═══════════════════════════════
-    bot.on('callback_query', (query) => {
-      try {
-        const chatId = query.message.chat.id;
-        const userId = query.from.id;
-        const data = query.data;
-
-        console.log('📨 [bot] Callback: ' + data + ' от ' + userId);
-
-        bot.answerCallbackQuery(query.id).catch(() => {});
-
-        if (data === 'ref') {
-  const refLink = 'https://t.me/' + BOT_USERNAME + '?start=' + userId;
-  bot.sendMessage(chatId, '👥 **Твоя реферальная ссылка:**\n\n`' + refLink + '`', { parse_mode: 'Markdown' });
-  return;
-}
-
-        if (data === 'profile') {
-          getPlayerProfile(userId).then((profile) => {
-            bot.sendMessage(chatId,
-              '📊 **Твой профиль:**\n\n' +
-              '👤 Имя: ' + profile.username + '\n' +
-              '🎯 Уровень: ' + profile.level + '\n' +
-              '⚔️ CP: ' + profile.cp + '\n' +
-              '🏰 Этаж: ' + profile.floor + '\n' +
-              '👾 Убийств: ' + profile.killCount + '\n' +
-              '🪙 Золото: ' + profile.gold + '\n' +
-              '💎 PIXR: ' + profile.pixr + '\n' +
-              '⭐ GRAM: ' + profile.gram,
-              { parse_mode: 'Markdown' }
-            );
-          });
-          return;
-        }
-
-        if (data.startsWith('approve_') || data.startsWith('reject_')) {
-          const action = data.startsWith('approve_') ? 'approve' : 'reject';
-          const txId = data.replace(/^(approve|reject)_/, '');
-          const msgId = query.message.message_id;
-
-          console.log('💳 [bot] Обработка транзакции: ' + txId + ' -> ' + action);
-
-          bot.editMessageReplyMarkup(
-            { inline_keyboard: [[{ text: '⏳ Обработка...', callback_data: 'noop' }]] },
-            { chat_id: chatId, message_id: msgId }
-          ).catch(() => {});
-
-          const _fetch = typeof fetch !== 'undefined' ? fetch : require('node-fetch');
-
-          _fetch(API_URL + '/bot/transaction/' + txId + '/' + action, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-bot-secret': BOT_TOKEN
-            },
-            body: JSON.stringify({})
-          })
-          .then(r => r.json())
-          .then((result) => {
-            if (result.ok) {
-              const doneText = action === 'approve' ? '✅ Подтверждено' : '❌ Отклонено';
-              bot.editMessageReplyMarkup(
-                { inline_keyboard: [[{ text: doneText, callback_data: 'done_' + txId }]] },
-                { chat_id: chatId, message_id: msgId }
-              ).catch(() => {});
-              bot.answerCallbackQuery(query.id, { text: doneText }).catch(() => {});
-            } else {
-              const already = result.error === 'already_processed';
-              bot.editMessageReplyMarkup(
-                already
-                  ? { inline_keyboard: [[{ text: '⚠️ Уже обработана', callback_data: 'done_' + txId }]] }
-                  : { inline_keyboard: [[{ text: '✅ Подтвердить', callback_data: 'approve_' + txId }, { text: '❌ Отклонить', callback_data: 'reject_' + txId }]] },
-                { chat_id: chatId, message_id: msgId }
-              ).catch(() => {});
-              bot.answerCallbackQuery(query.id, {
-                text: already ? '⚠️ Транзакция уже обработана' : '❌ Ошибка: ' + (result.error || 'unknown'),
-                show_alert: true
-              }).catch(() => {});
-            }
-          })
-          .catch((err) => {
-            console.error('❌ [bot] Ошибка обработки транзакции:', err.message);
-            bot.editMessageReplyMarkup(
-              { inline_keyboard: [[{ text: '✅ Подтвердить', callback_data: 'approve_' + txId }, { text: '❌ Отклонить', callback_data: 'reject_' + txId }]] },
-              { chat_id: chatId, message_id: msgId }
-            ).catch(() => {});
-            bot.answerCallbackQuery(query.id, { text: '❌ Ошибка сервера' }).catch(() => {});
-          });
-          return;
-        }
-
-        if (data.startsWith('done_') || data === 'noop') {
-          bot.answerCallbackQuery(query.id, { text: 'Транзакция уже обработана' }).catch(() => {});
-          return;
-        }
-      } catch (e) {
-        console.error('❌ [bot] Callback error:', e.message);
-      }
-    });
-
-    console.log('✅ [bot] Все обработчики зарегистрированы');
-    return bot;
-
-  } catch (e) {
-    console.error('❌ [bot] Ошибка:', e.message);
-    return null;
-  }
-}
-
-// ── Получение профиля ──
-function getPlayerProfile(userId) {
-  try {
-    return Save.findOne({ tgId: String(userId) }).lean()
-      .then((doc) => {
-        if (!doc) {
-          return { username: 'Новичок', level: 1, cp: 0, floor: 1, killCount: 0, gold: 0, pixr: 0, gram: 0 };
-        }
-        const data = doc.data || {};
-        return {
-          username:  doc.firstName || doc.username || 'Игрок',
-          level:     doc.level     || 1,
-          cp:        doc.cp        || 0,
-          floor:     doc.floor     || 1,
-          killCount: data.killCount || 0,
-          gold:      data.gold     || 0,
-          pixr:      data.pixr     || 0,
-          gram:      data.gram     || 0
-        };
-      })
-      .catch((e) => {
-        console.error('❌ [bot] getPlayerProfile error:', e.message);
-        return { username: 'Ошибка', level: 0, cp: 0, floor: 0, killCount: 0, gold: 0, pixr: 0, gram: 0 };
-      });
-  } catch (e) {
-    console.error('❌ [bot] getPlayerProfile error:', e.message);
-    return Promise.resolve({ username: 'Ошибка', level: 0, cp: 0, floor: 0, killCount: 0, gold: 0, pixr: 0, gram: 0 });
-  }
-}
-
-// ── Инициализация бота ──
-// Запускаем бота сразу при старте сервера
-initBot();
-
-// ═══════════════════════════════
-//  АДМИН-ПАНЕЛЬ
-// ═══════════════════════════════
-
-// ── Конфиг админов ──
-const ADMIN_CREDENTIALS = {
-  admin: {
-    password: process.env.ADMIN_PASSWORD || 'pixel2024',
-    role: 'superadmin'
-  }
-};
-
-// ── Сессии ──
-const adminSessions = new Map();
-
-function generateSessionId() {
-  return require('crypto').randomBytes(24).toString('hex'); // ✅ криптостойкий
-}
-
-function createSession(login, role) {
-  const sessionId = generateSessionId();
-  adminSessions.set(sessionId, {
-    login,
-    role,
-    expires: Date.now() + 24 * 60 * 60 * 1000
-  });
-  return sessionId;
-}
-
-function getSession(sessionId) {
-  const session = adminSessions.get(sessionId);
-  if (!session) return null;
-  if (session.expires < Date.now()) {
-    adminSessions.delete(sessionId);
-    return null;
-  }
-  return session;
-}
-
-function requireAdmin(req, res, next) {
-  const sessionId = req.headers['x-admin-session'] || req.query.session;
-  const session = getSession(sessionId);
-  
-  if (!session) {
-    return res.status(401).json({ ok: false, error: 'unauthorized' });
-  }
-  
-  req.admin = session;
-  next();
-}
-
-
-// ✅ Очистка протухших сессий (утечка памяти)
-setInterval(() => {
-  const now = Date.now();
-  adminSessions.forEach((s, k) => { if (s.expires < now) adminSessions.delete(k); });
-}, 60 * 60 * 1000);
-
-async function logAdminAction(admin, action, target, details) {
-  try {
-    await AdminLog.create({ admin, action, target, details });
-  } catch (e) {
-    console.error('❌ [admin] log error:', e.message);
-  }
-}
-
-// ── Админ: список транзакций ──
-app.get('/admin/api/transactions', requireAdmin, async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 50;
-    const status = req.query.status || 'all';
-    
-    const filter = {};
-    if (status !== 'all') filter.status = status;
-    
-    const txs = await Transaction.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
-    
-    res.json({ ok: true, transactions: txs });
-  } catch (e) {
-    console.error('❌ [admin] transactions error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ── Админ: роуты пользователей ──
-app.get('/admin/api/users', requireAdmin, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const search = req.query.search || '';
-    const skip = (page - 1) * limit;
-    
-    let filter = {};
-    if (search) {
-      filter = {
-        $or: [
-          { tgId: { $regex: search, $options: 'i' } },
-          { username: { $regex: search, $options: 'i' } },
-          { firstName: { $regex: search, $options: 'i' } }
-        ]
-      };
-    }
-    
-    const total = await Save.countDocuments(filter);
-    const users = await Save.find(filter)
-      .sort({ updatedAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-    
-    res.json({
-      ok: true,
-      users: users.map(u => ({
-        tgId: u.tgId,
-        username: u.username,
-        firstName: u.firstName,
-        charId: u.charId,
-        level: u.level,
-        cp: u.cp,
-        floor: u.floor,
-        updatedAt: u.updatedAt,
-        data: u.data || {}
-      })),
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit)
-    });
-  } catch (e) {
-    console.error('❌ [admin] users error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ── Admin: список заданий ──
-app.get('/admin/api/tasks', requireAdmin, async (req, res) => {
-  try {
-    const tasks = await SpecialTask.find().sort({ createdAt: -1 }).lean();
-    res.json({ ok: true, tasks });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-// ── Admin: создать задание ──
-app.post('/admin/api/tasks', requireAdmin, async (req, res) => {
-  try {
-    const { title, description, link, linkText, rewardType, rewardAmount } = req.body;
-    if (!title || !rewardType || !rewardAmount)
-      return res.status(400).json({ ok: false, error: 'missing_fields' });
-    const taskId = 'task_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
-    const task   = await SpecialTask.create({
-      taskId, title,
-      description:  description  || '',
-      link:         link         || '',
-      linkText:     linkText     || 'Перейти',
-      rewardType,
-      rewardAmount: Number(rewardAmount),
-      active: true,
-      createdAt: Date.now(),
-    });
-    await logAdminAction(req.admin.login, 'create_task', taskId, { title, rewardType, rewardAmount });
-    res.json({ ok: true, task });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-// ── Admin: удалить задание ──
-app.delete('/admin/api/tasks/:taskId', requireAdmin, async (req, res) => {
-  try {
-    await SpecialTask.deleteOne({ taskId: req.params.taskId });
-    await logAdminAction(req.admin.login, 'delete_task', req.params.taskId, {});
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-// ── Admin: вкл/выкл задание ──
-app.patch('/admin/api/tasks/:taskId/toggle', requireAdmin, async (req, res) => {
-  try {
-    const task = await SpecialTask.findOne({ taskId: req.params.taskId });
-    if (!task) return res.status(404).json({ ok: false, error: 'not_found' });
-    task.active = !task.active;
-    await task.save();
-    res.json({ ok: true, active: task.active });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-app.get('/admin/api/user/:tgId', requireAdmin, async (req, res) => {
-  try {
-    const user = await Save.findOne({ tgId: req.params.tgId }).lean();
-    if (!user) {
-      return res.status(404).json({ ok: false, error: 'user_not_found' });
-    }
-    
-    res.json({
-      ok: true,
-      user: {
-        tgId: user.tgId,
-        username: user.username,
-        firstName: user.firstName,
-        charId: user.charId,
-        level: user.level,
-        cp: user.cp,
-        floor: user.floor,
-        updatedAt: user.updatedAt,
-        refBy: user.refBy,
-        refMilestones: user.refMilestones,
-        data: user.data || {}
-      }
-    });
-  } catch (e) {
-    console.error('❌ [admin] user error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.post('/admin/api/user/:tgId/update', requireAdmin, async (req, res) => {
-  try {
-    const { tgId } = req.params;
-    const updates = req.body;
-    
-    const updateData = {};
-    
-    if (updates.gold !== undefined) updateData['data.gold'] = updates.gold;
-    if (updates.pixr !== undefined) updateData['data.pixr'] = updates.pixr;
-    if (updates.gram !== undefined) updateData['data.gram'] = updates.gram;
-    if (updates.level !== undefined) updateData.level = updates.level;
-    if (updates.floor !== undefined) updateData.floor = updates.floor;
-    if (updates.charId !== undefined) updateData.charId = updates.charId;
-    
-    updateData.updatedAt = Date.now();
-    
-    const result = await Save.findOneAndUpdate(
-      { tgId: tgId },
-      { $set: updateData },
-      { new: true }
-    );
-    
-    if (!result) {
-      return res.status(404).json({ ok: false, error: 'user_not_found' });
-    }
-    
-    console.log(`✅ [admin] Обновлён пользователь ${tgId}:`, updates);
-    
-    await logAdminAction(req.admin.login, 'update_user', tgId, updates);
-    
-    notifyClient(tgId, 'reload', { reason: 'user_updated' });
-    
-    res.json({ 
-      ok: true, 
-      user: {
-        tgId: result.tgId,
-        username: result.username,
-        firstName: result.firstName,
-        charId: result.charId,
-        level: result.level,
-        cp: result.cp,
-        floor: result.floor,
-        data: result.data
-      }
-    });
-  } catch (e) {
-    console.error('❌ [admin] update error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.get('/admin/api/user/:tgId/referrals', requireAdmin, async (req, res) => {
-  try {
-    const { tgId } = req.params;
-    
-    const referrals = await Save.find({ refBy: tgId })
-      .select('tgId username firstName level cp floor charId data.gold data.pixr')
-      .lean();
-    
-    res.json({
-      ok: true,
-      referrals: referrals.map(r => ({
-        tgId: r.tgId,
-        username: r.username || r.firstName || 'Игрок',
-        level: r.level || 1,
-        cp: r.cp || 0,
-        floor: r.floor || 1,
-        charId: r.charId,
-        gold: r.data?.gold || 0,
-        pixr: r.data?.pixr || 0
-      }))
-    });
-  } catch (e) {
-    console.error('❌ [admin] referrals error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ── Админ: выдача предмета ──
-app.post('/admin/api/user/:tgId/give-item', requireAdmin, async (req, res) => {
-  try {
-    const { tgId } = req.params;
-    const { slot, name, rarity, level, stats, icon, forClass } = req.body;
-    
-    if (!slot || !name || !rarity) {
-      return res.status(400).json({ ok: false, error: 'missing_fields' });
-    }
-    
-    const item = {
-      id: Date.now() + Math.floor(Math.random() * 10000),
-      slot: slot,
-      name: name,
-      icon: icon || 'images/ac.png',
-      rarity: rarity,
-      level: level || 1,
-      stats: stats || {},
-      _equipped: false
-    };
-    
-    if (forClass) item.forClass = forClass;
-    
-    const result = await Save.findOneAndUpdate(
-      { tgId: tgId },
-      { 
-        $push: { 'data.inventory': item },
-        $set: { updatedAt: Date.now() }
-      },
-      { new: true }
-    );
-    
-    if (!result) {
-      return res.status(404).json({ ok: false, error: 'user_not_found' });
-    }
-    
-    console.log(`✅ [admin] Предмет выдан ${tgId}: ${name}`);
-    
-    await logAdminAction(req.admin.login, 'give_item', tgId, { item });
-    
-    notifyClient(tgId, 'reload', { reason: 'item_given' });
-    
-    res.json({ ok: true, item });
-  } catch (e) {
-    console.error('❌ [admin] give-item error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ── Админ: сброс прогресса пользователя (сохраняет рефералов) ──
-app.post('/admin/api/user/:tgId/reset', requireAdmin, async (req, res) => {
-  try {
-    const { tgId } = req.params;
-
-    const user = await Save.findOne({ tgId }).lean();
-    if (!user) return res.status(404).json({ ok: false, error: 'user_not_found' });
-
-    // Обнуляем выплаченные награды (значения→0), но сохраняем сам список рефералов (ключи)
-    const oldMilestones = user.refMilestones || {};
-    const clearedMilestones = {};
-    Object.keys(oldMilestones).forEach(k => { clearedMilestones[k] = 0; });
-
-    const resetNow = Date.now();
-    const resetUpdate = {
-      charId:        null,
-      level:         1,
-      cp:            0,
-      floor:         1,
-      updatedAt:     resetNow,
-      refMilestones: clearedMilestones,
-      refClaimVer:   0,
-      data: {
-        tgId:            tgId,
-        charId:          null,
-        refBy:           user.refBy || null,
-        updatedAt:       resetNow,
-        _adminUpdatedAt: resetNow,
-        _resetAt:        resetNow,
-      }
-    };
-
-    await Save.updateOne({ tgId }, { $set: resetUpdate });
-
-    console.log(`🔄 [admin] Прогресс сброшен для ${tgId} (рефералы сохранены, награды сброшены)`);
-    await logAdminAction(req.admin.login, 'reset_progress', tgId, { preserved: ['refBy'], cleared: ['refMilestones_values', 'refClaimVer'] });
-
-    notifyClient(tgId, 'force_close', { reason: 'progress_reset' });
-
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('❌ [admin] reset error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ── Админ: сброс прогресса ВСЕХ пользователей ──
-app.post('/admin/api/reset-all', requireAdmin, async (req, res) => {
-  try {
-    const { confirm } = req.body;
-    if (confirm !== 'RESET_ALL') {
-      return res.status(400).json({ ok: false, error: 'confirmation_required' });
-    }
-
-    const users = await Save.find({}, 'tgId refBy refMilestones').lean();
-
-    let processed = 0;
-    for (const user of users) {
-      const oldMilestones = user.refMilestones || {};
-      const clearedMilestones = {};
-      Object.keys(oldMilestones).forEach(k => { clearedMilestones[k] = 0; });
-
-      const resetNow = Date.now();
-      await Save.updateOne({ tgId: user.tgId }, {
-        $set: {
-          charId:        null,
-          level:         1,
-          cp:            0,
-          floor:         1,
-          updatedAt:     resetNow,
-          refMilestones: clearedMilestones,
-          refClaimVer:   0,
-          data: {
-            tgId:            user.tgId,
-            charId:          null,
-            refBy:           user.refBy || null,
-            updatedAt:       resetNow,
-            _adminUpdatedAt: resetNow,
-            _resetAt:        resetNow,
-          }
-        }
-      });
-      notifyClient(user.tgId, 'force_close', { reason: 'progress_reset' });
-      processed++;
-    }
-
-    console.log(`🔄 [admin] Массовый сброс: ${processed} игроков`);
-    await logAdminAction(req.admin.login, 'reset_all_progress', 'ALL', { count: processed });
-
-    res.json({ ok: true, count: processed });
-  } catch (e) {
-    console.error('❌ [admin] reset-all error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ── Админ: подтверждение транзакции ──
-app.post('/admin/api/transaction/:txId/:action', requireAdmin, async (req, res) => {
-  try {
-    const { txId, action } = req.params;
-    
-    if (!['approve', 'reject'].includes(action)) {
-      return res.status(400).json({ ok: false, error: 'invalid_action' });
-    }
-    
-    // ✅ Атомарно — защита от двойного одобрения
-    const tx = await Transaction.findOneAndUpdate(
-      { id: txId, status: 'pending' },
-      { $set: { status: action === 'approve' ? 'approved' : 'rejected',
-                [action === 'approve' ? 'approvedAt' : 'rejectedAt']: Date.now() } },
-      { new: false }
-    );
-    if (!tx) {
-      const existing = await Transaction.findOne({ id: txId }).lean();
-      if (!existing) return res.status(404).json({ ok: false, error: 'transaction_not_found' });
-      return res.status(400).json({ ok: false, error: 'transaction_already_processed' });
-    }
-
-    if (action === 'approve') {
-      
-      const gramDelta = tx.type === 'deposit' ? tx.amount : -tx.amount;
-      
-      console.log(`💰 [admin] Начисление ${gramDelta} GRAM пользователю ${tx.userId}`);
-      
-      const newUpdatedAt = Date.now();
-      
-      const result = await Save.findOneAndUpdate(
-        { tgId: tx.userId },
-        { 
-          $inc: { 'data.gram': gramDelta },
-          $set: { 
-            'data.updatedAt': newUpdatedAt,
-            updatedAt: newUpdatedAt 
-          }
-        },
-        { new: true }
-      );
-      
-      console.log(`💰 [admin] Новый баланс: ${result?.data?.gram || 0} GRAM`);
-      
-      notifyClient(tx.userId, 'reload', { 
-        reason: 'balance_updated',
-        gram: result?.data?.gram || 0
-      });
-
-      // ── Реферальный бонус: 5% от депозита GRAM рефереру ──
-      if (tx.type === 'deposit' && tx.amount > 0) {
-        try {
-          const depositor = await Save.findOne({ tgId: tx.userId }, 'refBy firstName username').lean();
-          if (depositor && depositor.refBy) {
-            const bonus = Math.round(tx.amount * REF_DEPOSIT_BONUS * 1000) / 1000;
-            if (bonus > 0) {
-              const refUpdatedAt = Date.now();
-              const refResult = await Save.findOneAndUpdate(
-                { tgId: depositor.refBy },
-                {
-                  $inc: { 'data.gram': bonus },
-                  $set: { 'data.updatedAt': refUpdatedAt, updatedAt: refUpdatedAt }
-                },
-                { new: true }
-              );
-              console.log(`🎁 [admin] Реф. бонус ${bonus} GRAM → ${depositor.refBy} (от депозита ${tx.amount} GRAM пользователя ${tx.userId})`);
-              notifyClient(depositor.refBy, 'reload', {
-                reason: 'ref_bonus',
-                gram: refResult?.data?.gram || 0
-              });
-              if (bot) {
-                const depositorName = depositor.firstName || depositor.username || tx.userId;
-                try {
-                  await bot.sendMessage(
-                    depositor.refBy,
-                    `🎁 *Реферальный бонус!*\n\nВаш друг *${depositorName}* пополнил баланс на *${tx.amount} GRAM*\nВы получили *+${bonus} GRAM* (5%) на счёт!`,
-                    { parse_mode: 'Markdown' }
-                  );
-                } catch (e) {}
-              }
-            }
-          }
-        } catch (refErr) {
-          console.error('❌ [admin] Ошибка начисления реф. бонуса:', refErr.message);
-        }
-      }
-    }
-    
-    await logAdminAction(req.admin.login, action + '_transaction', tx.userId, { txId, amount: tx.amount });
-    
-    if (bot) {
-      const statusText = action === 'approve' ? '✅ Подтверждена' : '❌ Отклонена';
-      const msg = `
-💰 **Транзакция ${statusText}**
-
-**Тип:** ${tx.type === 'deposit' ? 'Пополнение' : 'Вывод'}
-**Сумма:** ${tx.amount} GRAM
-**Статус:** ${statusText}
-${action === 'approve' ? '✅ Баланс обновлен!' : '❌ Средства не были зачислены.'}
-
-🔄 *Для обновления баланса перезапустите игру или нажмите "Обновить" в кошельке.*
-      `;
-      try {
-        await bot.sendMessage(tx.userId, msg, { parse_mode: 'Markdown' });
-      } catch (e) {}
-    }
-    
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('❌ [admin] transaction error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.get('/admin/api/items/list', requireAdmin, (req, res) => {
-  try {
-    const items = [];
-    
-    const ITEM_TYPES = [
-      { slot: 'body',   name: 'Нагрудник', stats: ['def', 'hp'],   primary: 'def' },
-      { slot: 'legs',   name: 'Штаны',     stats: ['def', 'dodge'], primary: 'def' },
-      { slot: 'gloves', name: 'Перчатки',  stats: ['atk', 'def'],  primary: 'atk' },
-      { slot: 'boots',  name: 'Боты',      stats: ['spd', 'dodge'], primary: 'spd' },
-      { slot: 'helmet', name: 'Шлем',      stats: ['def', 'hp'],   primary: 'def' },
-      { slot: 'ring',   name: 'Кольцо',    stats: ['atk', 'spd'],  primary: 'atk' },
-      { slot: 'belt',   name: 'Пояс',      stats: ['hp', 'def'],   primary: 'hp'  }
-    ];
-
-    const STAFF_TYPES = [
-      { slot: 'weapon', name: 'Посох огня',  stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'fire',  classLabel: 'Пирокан' },
-      { slot: 'weapon', name: 'Посох света', stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'light', classLabel: 'Люмос'   },
-      { slot: 'weapon', name: 'Посох воды',  stats: ['atk', 'crit', 'critDmg'], primary: 'atk', forClass: 'water', classLabel: 'Аквас'   }
-    ];
-    
-    ITEM_TYPES.forEach(type => items.push({
-      slot: type.slot,
-      name: type.name,
-      stats: type.stats,
-      primary: type.primary
-    }));
-    
-    STAFF_TYPES.forEach(type => items.push({
-      slot: type.slot,
-      name: type.name,
-      stats: type.stats,
-      primary: type.primary,
-      forClass: type.forClass,
-      classLabel: type.classLabel
-    }));
-    
-    res.json({ ok: true, items });
-  } catch (e) {
-    console.error('❌ [admin] items list error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.get('/admin/api/stats', requireAdmin, async (req, res) => {
-  try {
-    const totalUsers = await Save.countDocuments();
-    const usersWithChar = await Save.countDocuments({ charId: { $ne: null } });
-    
-    const floors = await Save.aggregate([
-      { $group: { _id: '$floor', count: { $sum: 1 } } },
-      { $sort: { _id: 1 } }
-    ]);
-    
-    const now = Date.now();
-    const active24h = await Save.countDocuments({
-      updatedAt: { $gt: now - 24 * 60 * 60 * 1000 }
-    });
-    
-    const topCP = await Save.find({ charId: { $ne: null } })
-      .sort({ cp: -1 })
-      .limit(10)
-      .select('username firstName level cp charId')
-      .lean();
-    
-    res.json({
-      ok: true,
-      stats: {
-        totalUsers,
-        usersWithChar,
-        active24h,
-        floors,
-        topCP,
-        online: await Save.countDocuments({ updatedAt: { $gt: Date.now() - 5 * 60 * 1000 } })
-      }
-    });
-  } catch (e) {
-    console.error('❌ [admin] stats error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ── Админ: рейтинг по времени (топ-50) ──
-app.get('/admin/api/playtime', requireAdmin, async (req, res) => {
-  try {
-    const limit     = Math.min(parseInt(req.query.limit) || 50, 200);
-    const sortBy    = req.query.sort || 'total';
-    const sortField = sortBy === 'today' ? 'todaySeconds' : sortBy === 'sessions' ? 'sessions' : 'totalSeconds';
-
-    const top = await PlaytimeRating.find()
-      .sort({ [sortField]: -1 })
-      .limit(limit)
-      .lean();
-
-    const agg = await PlaytimeRating.aggregate([
-      { $group: { _id: null, total: { $sum: '$totalSeconds' } } }
-    ]);
-    const grandTotal = (agg[0] && agg[0].total) || 0;
-
-    res.json({
-      ok: true,
-      grandTotal,
-      players: top.map((p, i) => ({
-        rank:         i + 1,
-        tgId:         p.tgId,
-        name:         p.firstName || p.username || 'Игрок',
-        username:     p.username || '',
-        charId:       p.charId,
-        level:        p.level || 1,
-        totalSeconds: p.totalSeconds || 0,
-        todaySeconds: p.todaySeconds || 0,
-        sessions:     p.sessions || 0,
-        lastSeenAt:   p.lastSeenAt || 0,
-      })),
-    });
-  } catch (e) {
-    console.error('❌ [admin] playtime error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.get('/admin/api/logs', requireAdmin, async (req, res) => {
-  try {
-    const logs = await AdminLog.find()
-      .sort({ timestamp: -1 })
-      .limit(100)
-      .lean();
-    
-    res.json({ ok: true, logs });
-  } catch (e) {
-    console.error('❌ [admin] logs error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.post('/admin/api/broadcast', requireAdmin, async (req, res) => {
-  try {
-    const { message, target } = req.body;
-    
-    if (!message || message.length < 1) {
-      return res.status(400).json({ ok: false, error: 'empty_message' });
-    }
-    
-    await logAdminAction(req.admin.login, 'broadcast', 'all', { 
-      message: message.substring(0, 100),
-      target: target || 'all'
-    });
-    
-    let sent = 0;
-    if (bot) {
-      const users = await Save.find({ charId: { $ne: null } }).select('tgId').lean();
-      for (const user of users) {
-        try {
-          await bot.sendMessage(user.tgId, message);
-          sent++;
-        } catch (e) {}
-      }
-    }
-    
-    res.json({ ok: true, sent });
-  } catch (e) {
-    console.error('❌ [admin] broadcast error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.post('/admin/login', express.json(), (req, res) => {
-  const { login, password } = req.body;
-  
-  if (!login || !password) {
-    return res.status(400).json({ ok: false, error: 'missing_credentials' });
-  }
-  
-  const admin = ADMIN_CREDENTIALS[login];
-  if (!admin || admin.password !== password) {
-    return res.status(401).json({ ok: false, error: 'invalid_credentials' });
-  }
-  
-  const sessionId = createSession(login, admin.role);
-  
-  res.json({
-    ok: true,
-    session: sessionId,
-    role: admin.role,
-    login: login
-  });
-});
-
-app.get('/admin/check', (req, res) => {
-  const sessionId = req.headers['x-admin-session'] || req.query.session;
-  const session = getSession(sessionId);
-  
-  if (!session) {
-    return res.json({ ok: false, error: 'unauthorized' });
-  }
-  
-  res.json({ ok: true, role: session.role, login: session.login });
-});
-
-app.post('/admin/logout', (req, res) => {
-  const sessionId = req.headers['x-admin-session'] || req.body.session;
-  if (sessionId) {
-    adminSessions.delete(sessionId);
-  }
-  res.json({ ok: true });
-});
-
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'admin.html'));
-});
-
 
 // ═══════════════════════════════
 //  МАРКЕТ
@@ -2487,9 +1778,15 @@ app.post('/api/market/claim', async (req, res) => {
     const earned = listing.pendingPixr;
 
     // Начисляем PIXR продавцу
+    // ✅ FIX #4: обновляем data.updatedAt чтобы последующий saveInstant клиента
+    // не перетёр начисленный pixr устаревшим значением из снапшота
+    const now = Date.now();
     const updated = await Save.findOneAndUpdate(
       { tgId: tg.id },
-      { $inc: { 'data.pixr': earned }, $set: { updatedAt: Date.now() } },
+      {
+        $inc: { 'data.pixr': earned },
+        $set: { 'data.updatedAt': now, updatedAt: now }
+      },
       { new: true }
     );
     if (!updated) return res.status(404).json({ ok: false, error: 'user_not_found' });
@@ -2711,7 +2008,6 @@ app.post('/api/market/buy', async (req, res) => {
 
     // Атомарно списываем PIXR у покупателя и начисляем предмет/руду
     let buyerUpdate;
-    let boughtItem;
     if (isOre) {
       const oreKey = 'data.ore.' + listing.item.oreId;
       buyerUpdate = {
@@ -2719,13 +2015,9 @@ app.post('/api/market/buy', async (req, res) => {
         $set: { updatedAt: Date.now() }
       };
     } else {
-      // Переназначаем id чтобы не совпал с предметами покупателя
-      boughtItem = Object.assign({}, listing.item, {
-        id: Date.now() + Math.floor(Math.random() * 1000000)
-      });
       buyerUpdate = {
         $inc: { 'data.pixr': -price },
-        $push: { 'data.inventory': boughtItem },
+        $push: { 'data.inventory': listing.item },
         $set: { updatedAt: Date.now() }
       };
     }
@@ -2736,14 +2028,14 @@ app.post('/api/market/buy', async (req, res) => {
     );
     if (!buyer) return res.status(400).json({ ok: false, error: 'not_enough_pixr' });
 
-    // Атомарно закрываем лот — защита от гонки, двое не купят одновременно
+    const buyerFirstName = user.firstName || (user.data && user.data.firstName) || '';
     const sold = await MarketListing.findOneAndUpdate(
       { listingId, status: 'active' },
       {
         $set: {
           status: 'sold',
           buyerId: tg.id,
-          buyerName: user.data.firstName || user.username || 'Игрок',
+          buyerName: buyerFirstName || user.username || 'Игрок',
           soldAt: Date.now(),
         }
       },
@@ -2762,7 +2054,7 @@ app.post('/api/market/buy', async (req, res) => {
           { tgId: tg.id },
           {
             $inc: { 'data.pixr': price },
-            $pull: { 'data.inventory': { id: boughtItem.id } }
+            $pull: { 'data.inventory': { id: listing.item.id } }
           }
         );
       }
@@ -2788,7 +2080,7 @@ app.post('/api/market/buy', async (req, res) => {
     if (isOre) {
       res.json({ ok: true, item: listing.item, pixr: buyer.data.pixr, ore: buyer.data.ore || {} });
     } else {
-      res.json({ ok: true, item: boughtItem, pixr: buyer.data.pixr, inventory: buyer.data.inventory });
+      res.json({ ok: true, item: listing.item, pixr: buyer.data.pixr, inventory: buyer.data.inventory });
     }
   } catch (e) {
     console.error('❌ [market/buy] error:', e.message);
@@ -2843,100 +2135,6 @@ app.post('/api/market/cancel', async (req, res) => {
   }
 });
 
-
-// ═══════════════════════════════
-//  ПОКУПКА УЛУЧШЕНИЙ (атомарно)
-// ═══════════════════════════════
-app.post('/api/upgrade', async (req, res) => {
-  const tg = authUser(req, res);
-  if (!tg) return;
-  
-  const { upgId, cost, stat, bonus } = req.body;
-  if (!upgId || !cost) {
-    return res.status(400).json({ ok: false, error: 'missing_fields' });
-  }
-  
-  try {
-    const user = await Save.findOne({ tgId: tg.id });
-    if (!user) {
-      return res.status(404).json({ ok: false, error: 'user_not_found' });
-    }
-    
-    if (!user.data) user.data = {};
-    if (!user.data.upg) user.data.upg = {};
-    if (!user.data.baseStats) user.data.baseStats = {};
-    
-    const currentGold = user.data.gold || 0;
-    if (currentGold < cost) {
-      return res.status(400).json({ ok: false, error: 'not_enough_gold' });
-    }
-    
-    const currentLv = user.data.upg[upgId] || 0;
-    const maxLv = 60;
-    if (currentLv >= maxLv) {
-      return res.status(400).json({ ok: false, error: 'max_level' });
-    }
-    
-    // ✅ Вычисляем стоимость PIXR на сервере (синхронизация с клиентом)
-    let pixrCost = 0;
-    if (currentLv >= 20 && currentLv < 30) {
-      pixrCost = 15;
-    } else if (currentLv >= 30 && currentLv < 40) {
-      pixrCost = 30;
-    } else if (currentLv >= 40 && currentLv < 50) {
-      pixrCost = 60;
-    } else if (currentLv >= 50 && currentLv < 60) {
-      pixrCost = 100;
-    } else if (currentLv >= 60) {
-      pixrCost = 100;
-    }
-    
-    // Проверяем PIXR
-    const currentPixr = user.data.pixr || 0;
-    if (currentPixr < pixrCost) {
-      return res.status(400).json({ ok: false, error: 'not_enough_pixr' });
-    }
-    
-    const incObj = {
-      'data.gold': -cost,
-      'data.pixr': -pixrCost,
-    };
-    incObj['data.upg.' + upgId] = 1;
-    if (stat && bonus) {
-      incObj['data.baseStats.' + stat] = bonus;
-    }
-    
-    const result = await Save.findOneAndUpdate(
-      { 
-        tgId: tg.id,
-        'data.gold': { $gte: cost },
-        'data.pixr': { $gte: pixrCost }
-      },
-      {
-        $inc: incObj,
-        $set: { updatedAt: Date.now() }
-      },
-      { new: true }
-    );
-    
-    if (!result) {
-      return res.status(400).json({ ok: false, error: 'not_enough_resources' });
-    }
-    
-    console.log(`✅ [upgrade] ${tg.id} купил ${upgId} (уровень ${currentLv+1}), осталось золота: ${result.data.gold}, PIXR: ${result.data.pixr}`);
-    
-    res.json({
-      ok: true,
-      gold: result.data.gold || 0,
-      pixr: result.data.pixr || 0,
-      upgLevel: (result.data.upg && result.data.upg[upgId]) || 1,
-      baseStats: result.data.baseStats || {}
-    });
-  } catch (e) {
-    console.error('❌ [upgrade] error:', e.message);
-    res.status(500).json({ ok: false, error: 'server_error' });
-  }
-});
 
 
 // ═══════════════════════════════
@@ -3000,12 +2198,18 @@ function calcFullStats(data) {
   EQUIP_SLOTS.forEach(slot => {
     const itemId = equipped[slot];
     if (!itemId) return;
-    // Ищем предмет в инвентаре по id
-    const item = inventory.find(i => i.id === itemId);
+    // Ищем предмет в инвентаре по id (Number-safe сравнение)
+    const item = inventory.find(i => Number(i.id) === Number(itemId) || i.id === itemId);
     if (!item || !item.stats) return;
     Object.keys(item.stats).forEach(stat => {
       bonus[stat] = (bonus[stat] || 0) + (item.stats[stat] || 0);
     });
+    // ✅ FIX #9: учитываем руны предмета (atk/def/hp)
+    if (item.rune && typeof item.rune === 'object') {
+      ['atk', 'def', 'hp'].forEach(stat => {
+        if (item.rune[stat]) bonus[stat] = (bonus[stat] || 0) + item.rune[stat];
+      });
+    }
   });
 
   // 5. Итоговые статы + капы предметных бонусов (зеркало equippedStats клиента)
@@ -3086,12 +2290,79 @@ app.post('/api/pvp/opponents', async (req, res) => {
   }
 });
 
+// ── Серверная симуляция PvP боя (детерминированная по статам) ──
+function simulatePvpBattle(myStats, oppStats) {
+  const SIM_DURATION = 60; // секунд
+  const TICK = 1.0;        // такт симуляции
+
+  let myHp  = Math.max(1, Math.floor(myStats.hp  || 100));
+  let oppHp = Math.max(1, Math.floor(oppStats.hp || 100));
+  const myAtk  = Math.max(1, myStats.atk   || 10);
+  const oppAtk = Math.max(1, oppStats.atk  || 10);
+  const myDef  = myStats.def   || 0;
+  const oppDef = oppStats.def  || 0;
+  const mySpd  = Math.max(0.1, myStats.atkSpd  || 1.0);
+  const oppSpd = Math.max(0.1, oppStats.atkSpd || 1.0);
+  const myCrit    = Math.min(100, myStats.crit   || 0) / 100;
+  const oppCrit   = Math.min(100, oppStats.crit  || 0) / 100;
+  const myDodge   = Math.min(100, myStats.dodge  || 0) / 100;
+  const oppDodge  = Math.min(100, oppStats.dodge || 0) / 100;
+  const myCritDmg  = myStats.effectiveCritDmg  || 1.8;
+  const oppCritDmg = oppStats.effectiveCritDmg || 1.8;
+
+  let myTimer  = 1 / mySpd;
+  let oppTimer = 1 / oppSpd;
+  let elapsed  = 0;
+  let myDmgDealt = 0, oppDmgDealt = 0;
+
+  while (elapsed < SIM_DURATION && myHp > 0 && oppHp > 0) {
+    elapsed += TICK;
+    myTimer  -= TICK;
+    oppTimer -= TICK;
+
+    if (myTimer <= 0) {
+      if (Math.random() >= oppDodge) {
+        const isCrit = Math.random() < myCrit;
+        const raw = Math.max(1, myAtk - oppDef * 0.3);
+        const dmg = Math.floor(raw * (isCrit ? myCritDmg : 1));
+        oppHp -= dmg;
+        myDmgDealt += dmg;
+      }
+      myTimer = 1 / mySpd;
+    }
+
+    if (oppTimer <= 0 && oppHp > 0) {
+      if (Math.random() >= myDodge) {
+        const isCrit = Math.random() < oppCrit;
+        const raw = Math.max(1, oppAtk - myDef * 0.3);
+        const dmg = Math.floor(raw * (isCrit ? oppCritDmg : 1));
+        myHp -= dmg;
+        oppDmgDealt += dmg;
+      }
+      oppTimer = 1 / oppSpd;
+    }
+  }
+
+  // Определяем победителя: по HP (кто выжил), при ничьей — по нанесённому урону
+  let won;
+  if (myHp > 0 && oppHp <= 0)       won = true;
+  else if (oppHp > 0 && myHp <= 0)  won = false;
+  else won = myDmgDealt >= oppDmgDealt; // оба живы после 60с — побеждает нанёсший больше
+
+  return { won, myDmgDealt, oppDmgDealt };
+}
+
 // Сохранить результат PvP боя
 app.post('/api/pvp/result', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
+
+  // ✅ Rate limit: не более 15 запросов за 60 секунд
+  if (rateLimit(tg.id + '_pvp', 15, 60000)) {
+    return res.status(429).json({ ok: false, error: 'rate_limit' });
+  }
   try {
-    const { opponentId, won, myDmg, oppDmg } = req.body;
+    const { opponentId } = req.body;
     if (!opponentId) return res.json({ ok: false, error: 'bad_params' });
 
     const [myDoc, oppDoc] = await Promise.all([
@@ -3099,6 +2370,7 @@ app.post('/api/pvp/result', async (req, res) => {
       Save.findOne({ tgId: opponentId }).lean(),
     ]);
     if (!myDoc || !myDoc.data) return res.json({ ok: false, error: 'no_save' });
+    if (!oppDoc || !oppDoc.data) return res.json({ ok: false, error: 'opponent_not_found' });
 
     // Проверка попыток (10 в день, сброс в полночь UTC)
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -3110,8 +2382,13 @@ app.post('/api/pvp/result', async (req, res) => {
       return res.json({ ok: false, error: 'no_attempts' });
     }
 
-    const myRating   = data.arenaRating || 1000;
-    const oppRating  = (oppDoc && oppDoc.data && oppDoc.data.arenaRating) || 1000;
+    // ✅ Server-side симуляция боя — не доверяем полю `won` от клиента
+    const myFullStats  = calcFullStats(myDoc.data);
+    const oppFullStats = calcFullStats(oppDoc.data);
+    const { won, myDmgDealt, oppDmgDealt } = simulatePvpBattle(myFullStats, oppFullStats);
+
+    const myRating  = data.arenaRating || 1000;
+    const oppRating = (oppDoc.data.arenaRating) || 1000;
 
     // Очки: победа над сильнее = +10, над слабее = +5; поражение = -5
     let ratingChange = 0;
@@ -3121,8 +2398,8 @@ app.post('/api/pvp/result', async (req, res) => {
       ratingChange = -5;
     }
 
-    const newMyRating  = Math.max(0, myRating + ratingChange);
-    const newOppRating = oppDoc ? Math.max(0, oppRating + (won ? 0 : 0)) : oppRating;
+    const newMyRating = Math.max(0, myRating + ratingChange);
+    // Рейтинг защитника не меняется (одностороннее PvP)
     const now = Date.now();
 
     // Обновляем рейтинг атакующего
@@ -3140,9 +2417,9 @@ app.post('/api/pvp/result', async (req, res) => {
     );
 
     // Сохраняем историю боя
-    const battleId = tg.id + '_' + opponentId + '_' + now;
-    const oppName  = (oppDoc && (oppDoc.firstName || oppDoc.username)) || 'Игрок';
-    const oppChar  = (oppDoc && oppDoc.data && oppDoc.data.charId) || null;
+    const battleId  = tg.id + '_' + opponentId + '_' + now;
+    const oppName   = (oppDoc.firstName || oppDoc.username) || 'Игрок';
+    const oppChar   = (oppDoc.data && oppDoc.data.charId) || null;
 
     await PvpBattle.create({
       battleId,
@@ -3156,8 +2433,8 @@ app.post('/api/pvp/result', async (req, res) => {
       ratingChange,
       attackerRatingBefore: myRating,
       defenderRatingBefore: oppRating,
-      attackerDmgDealt: myDmg || 0,
-      defenderDmgDealt: oppDmg || 0,
+      attackerDmgDealt: myDmgDealt,   // ✅ серверное значение
+      defenderDmgDealt: oppDmgDealt,  // ✅ серверное значение
       createdAt: now,
     }).catch(() => {}); // Игнорируем ошибки дубликата
 
@@ -3256,25 +2533,6 @@ app.post('/api/playtime/rating', async (req, res) => {
 });
 
 // ── Счётчик сессий при входе в игру ──
-app.post('/api/playtime/session', async (req, res) => {
-  const tg = authUser(req, res);
-  if (!tg) return;
-  try {
-    await PlaytimeRating.findOneAndUpdate(
-      { tgId: tg.id },
-      { $inc: { sessions: 1 }, $set: { lastSeenAt: Date.now(), updatedAt: Date.now() } },
-      { upsert: true, new: false }
-    );
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('❌ [playtime/session]', e.message);
-    res.status(500).json({ ok: false, error: 'server_error' });
-  }
-});
-
-// ═══════════════════════════════
-//  БОТ: внутренний роут для транзакций
-// ═══════════════════════════════
 app.post('/bot/transaction/:txId/:action', async (req, res) => {
   const secret = req.headers['x-bot-secret'];
   if (!secret || secret !== BOT_TOKEN) {
@@ -3347,10 +2605,10 @@ app.post('/bot/transaction/:txId/:action', async (req, res) => {
                 reason: 'ref_bonus',
                 gram: refResult?.data?.gram || 0
               });
-              if (bot) {
+              if (getBot()) {
                 const depositorName = depositor.firstName || depositor.username || tx.userId;
                 try {
-                  await bot.sendMessage(
+                  await getBot()?.sendMessage(
                     depositor.refBy,
                     `🎁 *Реферальный бонус!*\n\nВаш друг *${depositorName}* пополнил баланс на *${tx.amount} GRAM*\nВы получили *+${bonus} GRAM* (5%) на счёт!`,
                     { parse_mode: 'Markdown' }
@@ -3365,21 +2623,32 @@ app.post('/bot/transaction/:txId/:action', async (req, res) => {
       }
     }
 
-    await logAdminAction('bot', action + '_transaction', tx.userId, { txId, amount: tx.amount });
+    try { await AdminLog.create({ admin: 'bot', action: action + '_transaction', target: tx.userId, details: { txId, amount: tx.amount }, timestamp: Date.now() }); } catch (_) {}
 
-    if (bot) {
+    if (getBot()) {
       const statusText = action === 'approve' ? '✅ Подтверждена' : '❌ Отклонена';
       const msg = `💰 *Транзакция ${statusText}*\n\n*Тип:* ${tx.type === 'deposit' ? 'Пополнение' : 'Вывод'}\n*Сумма:* ${tx.amount} GRAM\n${action === 'approve' ? '✅ Баланс обновлён!' : '❌ Средства не зачислены.'}\n\n🔄 *Для обновления баланса перезапустите игру или нажмите "Обновить" в кошельке.*`;
-      try { await bot.sendMessage(tx.userId, msg, { parse_mode: 'Markdown' }); } catch (e) {}
+      try { await getBot()?.sendMessage(tx.userId, msg, { parse_mode: 'Markdown' }); } catch (e) {}
     }
 
     res.json({ ok: true });
   } catch (e) {
     console.error('❌ [bot-tx] error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
+    res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
 
+
+
+// ═══════════════════════════════
+//  ИНИЦИАЛИЗАЦИЯ МОДУЛЕЙ
+// ═══════════════════════════════
+initBot(app, { Save, Transaction, notifyClient, REF_DEPOSIT_BONUS, AdminLog });
+
+registerAdminRoutes(app, {
+  Save, Transaction, AdminLog, SpecialTask, PlaytimeRating,
+  notifyClient, getBot, REF_DEPOSIT_BONUS,
+});
 
 // ═══════════════════════════════
 //  Запуск

@@ -136,9 +136,10 @@ function tryDropItem(floor) {
   if (!window.GameSync || !window.GameSync.state || !window.GameSync.state.online) {
     return;
   }
-  
+
+  // Книги навыков — только при наличии соединения
   tryDropSkillBook(floor);
-  
+
   if (Math.random() > dropChance(floor) * premMult('drop')) return;
   if (G.inventory.length >= 40) return;
   
@@ -244,10 +245,17 @@ function showDropNotif(item) {
 
 // Суммарный бонус от надетых предметов
 function equippedStats() {
-  var bonus = { atk: 0, def: 0, hp: 0, spd: 0, crit: 0, dodge: 0, critDmg: 0 };
+  var bonus = { atk: 0, def: 0, hp: 0, spd: 0, crit: 0, dodge: 0, critDmg: 0, atkSpd: 0 };
   Object.values(G.equipped).forEach(function(item) {
     if (!item) return;
+    // Статы предмета
     Object.keys(item.stats).forEach(function(s) { bonus[s] = (bonus[s] || 0) + item.stats[s]; });
+    // Бонусы от руны предмета (atk/def/hp)
+    if (item.rune && typeof item.rune === 'object') {
+      ['atk', 'def', 'hp'].forEach(function(s) {
+        if (item.rune[s]) bonus[s] = (bonus[s] || 0) + item.rune[s];
+      });
+    }
   });
   // Суммарные капы с предметов
   bonus.crit    = Math.min(bonus.crit,    10);
@@ -324,7 +332,7 @@ var REFINE_MAX     = 10;
 function refineCost(refLv)         { return REFINE_GOLD_COST[Math.min(refLv, REFINE_GOLD_COST.length - 1)]; }
 function refineStatBonus(refLv)    { return refLv < 5 ? 3 : 10; }
 function refineSuccessChance(refLv){ return REFINE_CHANCES_V2[Math.min(refLv, REFINE_CHANCES_V2.length - 1)]; }
-function refineStars(item)         { return item.isSkillBook ? REFINE_MAX : (item.refine || 0); }
+function refineStars(item)         { return item.isSkillBook ? REFINE_MAX_V2 : (item.refine || 0); }
 function refineStarsStr(n) {
   if (n === 0) return '✧✧✧✧✧✧✧✧✧✧';
   var show = Math.min(n, 10);
@@ -372,7 +380,7 @@ function openRefineModal(itemId) {
           '<div style="font-size:10px;color:' + (hasBless ? '#2ecc71' : '#e74c3c') + ';">' + (hasBless ? '✓ Камень ×' + G.blessStones : '✗ Нет камней') + '</div>' +
         '</button>' +
       '</div>' +
-      '<button onclick="document.getElementById("refineChoiceModal").remove()" style="margin-top:12px;background:transparent;border:1px solid #334;border-radius:6px;color:#445;padding:6px 24px;cursor:pointer;font-size:11px;font-family:inherit;">Отмена</button>' +
+      '<button onclick="document.getElementById(\'refineChoiceModal\').remove()" style="margin-top:12px;background:transparent;border:1px solid #334;border-radius:6px;color:#445;padding:6px 24px;cursor:pointer;font-size:11px;font-family:inherit;">Отмена</button>' +
     '</div>';
   document.getElementById('app').appendChild(modal);
 }
@@ -444,7 +452,7 @@ function showRefineResult(success, item, maxed, cost, bonus, mode, oreBack, oreK
     sub.textContent  = 'Нужно ' + cost + ' 💰';
   } else if (success === true) {
     icon.textContent = '✨'; text.textContent = '+' + item.refine + ' УСПЕХ!'; text.style.color = '#a78bfa';
-    sub.textContent  = 'Все статы +' + bonus + (mode === 'bless' ? ' · Камней: ' + G.blessStones : '');
+    sub.textContent  = 'Основной стат +' + bonus + (mode === 'bless' ? ' · Камней: ' + G.blessStones : '');
   } else if (success === 'safe') {
     icon.textContent = '🛡'; text.textContent = 'ПРОВАЛ (защита)'; text.style.color = '#2ecc71';
     sub.textContent  = 'Предмет цел · Камней: ' + (G.blessStones || 0);

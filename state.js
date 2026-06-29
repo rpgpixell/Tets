@@ -12,8 +12,8 @@
 //  характеристики, инвентарь, экипировка, навыки
 // ═══════════════════════════════
 const G = {
-  gold: 111111110,
-  pixr: 1111110,
+  gold: 0,
+  pixr: 0,
   gram: 0,
   level: 1,
   xp: 0,
@@ -24,7 +24,7 @@ const G = {
 
   stats: {
     atk: 10, def: 5, spd: 3, hp: 100,
-    crit: 5, dodge: 3, atkSpd: 1.0,
+    crit: 5, dodge: 3, atkSpd: 1.0, critDmg: 0,
   },
   hp: 100,
   maxHp: 100,

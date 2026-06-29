@@ -617,7 +617,7 @@ function _bossDrop(bossId) {
   var stats  = {};
   if (slot === 'weapon')                   { stats.atk  = Math.floor(base*mult); stats.crit  = Math.floor(base*mult*0.45); }
   else if (slot==='body'||slot==='helmet') { stats.def  = Math.floor(base*mult); stats.hp    = Math.floor(base*mult*0.45); }
-  else if (slot === 'ring')                { stats.crit = Math.floor(base*mult); stats.atk   = Math.floor(base*mult*0.45); }
+  else if (slot === 'ring')                { stats.atk  = Math.floor(base*mult); stats.spd   = Math.floor(base*mult*0.45); }
   else                                     { stats.spd  = Math.floor(base*mult); stats.dodge = Math.floor(base*mult*0.45); }
   return {
     id: ++_invIdCounter, slot: slot,
@@ -682,6 +682,11 @@ function gameOverSequence() {
 function revivePlayer() {
   var modal = document.getElementById('deathModal');
   if (modal) modal.classList.add('hidden');
+  // Очищаем висящие таймеры атак монстров — защита от урона-призрака
+  monsters.forEach(function(m) {
+    if (m._attackTimeout) { clearTimeout(m._attackTimeout); m._attackTimeout = null; }
+    m.attackTimer = monsterAtkInterval(); // сброс кулдауна атаки
+  });
   G.hp = Math.floor(G.maxHp * 0.3);
   player.state = 'run';
   player.invincible = 2.0;
@@ -719,7 +724,7 @@ canvas.addEventListener('touchstart', function(e) {
   }
 }, { passive: false });
 
-function attackMonster(m) {}
+// Авто-бой: attackMonster не используется (бой происходит автоматически в update loop)
 
 // ═══════════════════════════════
 //  ВСПЫШКА (красная при нехватке золота/CP)
@@ -737,6 +742,8 @@ var _loopRunning = false;
 
 function loop(ts) {
   if (!gameActive) { _loopRunning = false; return; } // стоп при офлайне
+  // Если lastTime=0 (первый тик после паузы) — не считаем огромный dt
+  if (lastTime === 0) { lastTime = ts; requestAnimationFrame(loop); return; }
   const dt = Math.min((ts - lastTime) / 1000, 0.1);
   lastTime = ts;
   update(dt);
@@ -833,7 +840,7 @@ const BP_REWARDS = [
   { lv: 15, iconFn: function() { return '<img src="images/ringe.png" style="width:28px;height:28px;object-fit:contain;image-rendering:pixelated;">'; }, desc: 'Кольцо Lv.10 Epic',
     apply: function() {
       var base = 10 * 2.5, mult = 1 + 3 * 0.55;
-      var stats = { def: Math.floor(base * mult * 1.0), dodge: Math.floor(base * mult * 0.45) };
+      var stats = { atk: Math.floor(base * mult * 1.0), spd: Math.floor(base * mult * 0.45) };
       var item = { id: ++_invIdCounter, slot: 'ring', name: 'Кольцо битвы',
         icon: itemIcon('ring', 'epic', null), rarity: 'epic', level: 10, stats: stats };
       G.inventory.push(item);

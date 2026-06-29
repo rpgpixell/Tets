@@ -17,26 +17,19 @@
   var API = (function() {
     var url = new URLSearchParams(window.location.search).get('api') || 
               window.ENV_API_URL || 
-              'https://tets-production-4fdc.up.railway.app';
+              'https://ghz-production.up.railway.app';
     return url.replace(/\/$/, '');
   })();
 
   var EQUIP_SLOTS = ['weapon', 'body', 'legs', 'gloves', 'belt', 'ring', 'boots', 'helmet'];
   
-  var INSTANT_FIELDS = [
-    'inventory', 'equipped', 'upg', 'skills', 
-    'potionLv', 'potionThreshold', 'floor', 'level',
-    'pixr', 'gram', 'bp', 'prem', 'marketUnlocked'
-  ];
-
   var TG_INIT = '';
-var START_PARAM = ''; // ✅ ЭТО ДОБАВИТЬ
+  var START_PARAM = '';
   var SYNC = {
     booted: false,
     started: false,
     online: false,
     pushing: false,
-    dirtyTimer: null,
     batchTimer: null,
     lastServerTs: 0,
     serverConfirmed: false,
@@ -51,13 +44,14 @@ var START_PARAM = ''; // ✅ ЭТО ДОБАВИТЬ
     lastLevel: 0,
     lastFloor: 0,
     lastPixr: 0,
+    lastDailySeconds: -1, // FIX #3: -1 = ещё не инициализировано, гарантирует отправку при первом батче
+    lastDailyDate: '',
   };
   
-  // ✅ Добавить ПОСЛЕ SYNC
-var AUTH = {
-  authorized: false,
-  error: null
-};
+  var AUTH = {
+    authorized: false,
+    error: null,
+  };
 
   function num(v, d) { v = Number(v); return isFinite(v) ? v : d; }
   function clone(o) { try { return JSON.parse(JSON.stringify(o)); } catch (e) { return Object.assign({}, o); } }
@@ -314,14 +308,16 @@ G.equipped = {
     if (hp <= 0) hp = Math.floor(G.maxHp * 0.3);
     G.hp = Math.max(1, Math.min(hp, G.maxHp));
 
-    SYNC.lastHp        = G.hp;
-    SYNC.lastGold      = G.gold;
-    SYNC.lastXp        = G.xp;
-    SYNC.lastKillCount = G.killCount;
-    SYNC.lastPotions   = G.potions;
-    SYNC.lastLevel     = G.level;
-    SYNC.lastFloor     = G.floor;
-    SYNC.lastPixr      = G.pixr || 0;
+    SYNC.lastHp           = G.hp;
+    SYNC.lastGold         = G.gold;
+    SYNC.lastXp           = G.xp;
+    SYNC.lastKillCount    = G.killCount;
+    SYNC.lastPotions      = G.potions;
+    SYNC.lastLevel        = G.level;
+    SYNC.lastFloor        = G.floor;
+    SYNC.lastPixr         = G.pixr || 0;
+    SYNC.lastDailySeconds = (G.dailyTasks && G.dailyTasks.seconds) || 0;
+    SYNC.lastDailyDate    = (G.dailyTasks && G.dailyTasks.date)    || '';
 
     return true;
   }
@@ -329,8 +325,6 @@ G.equipped = {
   // ═══════════════════════════════
   //  СЕРВЕРНЫЕ ЗАПРОСЫ
   // ═══════════════════════════════
-
-  var START_PARAM = '';
 
   function serverLoad() {
     if (!SYNC.online) return Promise.resolve(null);
@@ -434,48 +428,27 @@ G.equipped = {
       .catch(function() { _schedulePing(); });
   }
 
-  function serverSaveInstant(data) {
-    if (!SYNC.online || !SYNC.serverConfirmed) return Promise.resolve({ ok: false });
-
-    var snap = serializeState();
-    Object.keys(data).forEach(function(key) { snap[key] = data[key]; });
-    snap.updatedAt = Date.now();
-
-    return fetch(API + '/api/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ initData: TG_INIT, data: snap }),
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(r) {
-      if (r && r.ok) {
-        _onConnRestored();
-        if (r.updatedAt) SYNC.lastServerTs = r.updatedAt;
-      } else if (r && r.error === 'reset_detected') {
-        console.warn('🛑 [instant] reset_detected — закрываем приложение');
-        forceCloseApp();
-      }
-      return r;
-    })
-    .catch(function(e) {
-      _onConnLost();
-      throw e;
-    });
-  }
+  // ════════════════════════════════════════════════════
+  //  МГНОВЕННОЕ СОХРАНЕНИЕ — /api/save/delta (300ms debounce)
+  //  FIX: serverSaveInstant и serverSaveInstantDelta удалены.
+  //  Логика объединена прямо в saveInstant — никаких промежуточных функций.
+  // ════════════════════════════════════════════════════
 
   // ⚡ БАТЧ-СОХРАНЕНИЕ — КАЖДЫЕ 10 СЕКУНД (только дельта изменений)
   function serverSaveBatch() {
     if (!SYNC.online || !SYNC.serverConfirmed || SYNC.pushing) return;
     if (SYNC.rlBackoffUntil && Date.now() < SYNC.rlBackoffUntil) return;
 
-    var currentHp        = G.hp;
-    var currentGold      = G.gold;
-    var currentXp        = G.xp;
-    var currentKillCount = G.killCount;
-    var currentPotions   = G.potions;
-    var currentLevel     = G.level;
-    var currentFloor     = G.floor;
-    var currentPixr      = G.pixr;
+    var currentHp           = G.hp;
+    var currentGold         = G.gold;
+    var currentXp           = G.xp;
+    var currentKillCount    = G.killCount;
+    var currentPotions      = G.potions;
+    var currentLevel        = G.level;
+    var currentFloor        = G.floor;
+    var currentPixr         = G.pixr;
+    var currentDailySeconds = (G.dailyTasks && G.dailyTasks.seconds) || 0;
+    var currentDailyDate    = (G.dailyTasks && G.dailyTasks.date)    || '';
 
     // ✅ Собираем только изменившиеся поля
     var delta = {
@@ -495,6 +468,11 @@ G.equipped = {
     if (currentLevel     !== SYNC.lastLevel)     { delta.level     = currentLevel;     delta.xpNeeded = G.xpNeeded; hasChanges = true; }
     if (currentFloor     !== SYNC.lastFloor)     { delta.floor     = currentFloor;     delta.maxFloor = G.maxFloor; hasChanges = true; }
     if (currentPixr      !== SYNC.lastPixr)      { delta.pixr      = currentPixr;      hasChanges = true; }
+    // FIX #3: отправляем dailyTasks если изменились секунды или дата
+    if (currentDailySeconds !== SYNC.lastDailySeconds || currentDailyDate !== SYNC.lastDailyDate) {
+      delta.dailyTasks = clone(G.dailyTasks || { date: '', seconds: 0, claimed: [] });
+      hasChanges = true;
+    }
 
     if (!hasChanges) return;
 
@@ -515,8 +493,10 @@ G.equipped = {
           SYNC.lastPotions   = currentPotions;
           SYNC.lastLevel     = currentLevel;
           SYNC.lastFloor     = currentFloor;
-          SYNC.lastPixr      = currentPixr;
-          SYNC.lastServerTs  = r.updatedAt || delta.updatedAt;
+          SYNC.lastPixr         = currentPixr;
+          SYNC.lastDailySeconds = currentDailySeconds;
+          SYNC.lastDailyDate    = currentDailyDate;
+          SYNC.lastServerTs     = r.updatedAt || delta.updatedAt;
           SYNC.rlBackoffUntil = 0;
 
           // ✅ Если сервер вернул sync — применяем (админские изменения)
@@ -548,28 +528,91 @@ G.equipped = {
   }
 
   var _instantPending = {};
-var _instantTimer = null;
+  var _instantTimer   = null;
 
-function saveInstant(data) {
-  if (!SYNC.started || !SYNC.online) return;
-  Object.assign(_instantPending, data);
-  clearTimeout(_instantTimer);
-  _instantTimer = setTimeout(function() {
-    var d = _instantPending;
-    _instantPending = {};
-    serverSaveInstant(d).catch(function() {});
-  }, 300);
-}
+  // FIX: saveInstant напрямую шлёт дельту через /api/save/delta.
+  // Нет промежуточных функций, нет fallback'ов — ошибка просто логируется.
+  // touch() удалён — батч тикает сам по setInterval каждые 10с.
+  function saveInstant(data) {
+    if (!data || Object.keys(data).length === 0) return;
+    if (!SYNC.started || !SYNC.online || !SYNC.serverConfirmed) return;
+    Object.assign(_instantPending, data);
+    clearTimeout(_instantTimer);
+    _instantTimer = setTimeout(function() {
+      var d = _instantPending;
+      _instantPending = {};
 
-  function touch() {
-    if (!SYNC.started || !SYNC.online) return;
-    clearTimeout(SYNC.dirtyTimer);
-    SYNC.dirtyTimer = setTimeout(serverSaveBatch, 500);
+      var delta = Object.assign({}, d);
+      delta.tgId      = getTgId();
+      delta.charId    = (typeof G_CHAR !== 'undefined' && G_CHAR) ? G_CHAR.id : (G.charId || null);
+      delta.updatedAt = Date.now();
+      delta.cp        = (typeof calcCP === 'function') ? calcCP() : 0;
+
+      // FIX #2: нормализуем equipped — сервер ожидает {slot: id}, не полные объекты
+      // G.equipped хранит {slot: itemObject}, serializeState() конвертирует в {slot: id}
+      if (delta.equipped && typeof delta.equipped === 'object') {
+        var eqNorm = {};
+        EQUIP_SLOTS.forEach(function(slot) {
+          var it = delta.equipped[slot];
+          eqNorm[slot] = (it && typeof it === 'object') ? it.id : (it || null);
+        });
+        delta.equipped = eqNorm;
+      }
+      // Очищаем _equipped из inventory перед отправкой
+      if (Array.isArray(delta.inventory)) {
+        delta.inventory = delta.inventory.map(function(it) {
+          var c = clone(it); delete c._equipped; return c;
+        });
+      }
+
+      fetch(API + '/api/save/delta', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ initData: TG_INIT, delta: delta }),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (r && r.ok) {
+          _onConnRestored();
+          if (r.updatedAt) SYNC.lastServerTs = r.updatedAt;
+          // Синхронизируем last-значения чтобы батч не считал их «изменившимися»
+          if (d.pixr  !== undefined) SYNC.lastPixr  = d.pixr;
+          if (d.gold  !== undefined) SYNC.lastGold  = d.gold;
+          if (d.level !== undefined) SYNC.lastLevel = d.level;
+          if (d.floor !== undefined) SYNC.lastFloor = d.floor;
+          // Применяем серверный sync (админские изменения)
+          if (r.sync) {
+            if (r.sync.gram      !== undefined) G.gram = r.sync.gram;
+            if (r.sync.gold      !== undefined) { G.gold = r.sync.gold; SYNC.lastGold = G.gold; }
+            if (r.sync.pixr      !== undefined) { G.pixr = r.sync.pixr; SYNC.lastPixr = G.pixr; }
+            if (r.sync.inventory !== undefined) {
+              G.inventory = r.sync.inventory;
+              if (typeof renderInventory === 'function') renderInventory();
+            }
+            if (typeof updateHUD    === 'function') updateHUD();
+            if (typeof renderWallet === 'function') renderWallet();
+          }
+        } else if (r && r.error === 'reset_detected') {
+          console.warn('🛑 [instant] reset_detected — закрываем приложение');
+          forceCloseApp();
+        } else {
+          console.warn('⚠️ [instant] ошибка дельты:', r && r.error);
+        }
+      })
+      .catch(function(e) {
+        console.warn('⚠️ [instant] сеть недоступна:', e.message);
+        _onConnLost();
+      });
+    }, 300);
   }
 
+  // FIX 1: флаг предотвращает повторные вызовы (beforeunload + pagehide + visibilitychange + tg.close)
+  var _isFlushing = false;
   function flush() {
     if (!SYNC.started) return;
     if (!SYNC.online || !SYNC.serverConfirmed) return;
+    if (_isFlushing) return;
+    _isFlushing = true;
     var snap = serializeState();
     snap.updatedAt = Date.now();
     try {
@@ -580,6 +623,8 @@ function saveInstant(data) {
         keepalive: true,
       });
     } catch (e) {}
+    // Сбрасываем флаг через 2с — на случай если страница не закрылась (visibilitychange)
+    setTimeout(function() { _isFlushing = false; }, 2000);
   }
 
   // ═══════════════════════════════
@@ -588,7 +633,6 @@ function saveInstant(data) {
 
   var pollTimer = null;
   var isPolling = false;
-  var lastEventId = 0;
 
   function startPolling() {
     if (!SYNC.started || !SYNC.online) return;
@@ -617,10 +661,7 @@ function saveInstant(data) {
     fetch(API + '/api/poll', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        initData: TG_INIT,
-        lastEventId: lastEventId
-      })
+      body: JSON.stringify({ initData: TG_INIT })
     })
     .then(function(r) { 
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -628,7 +669,6 @@ function saveInstant(data) {
     })
     .then(function(response) {
       isPolling = false;
-      lastEventId = response.timestamp || Date.now();
 
       if (response.ok && response.notifications && response.notifications.length > 0) {
         console.log('📨 [Poll] Получено ' + response.notifications.length + ' уведомлений');
@@ -691,6 +731,8 @@ function saveInstant(data) {
     SYNC.started = false;
     if (typeof window.gameActive !== 'undefined') window.gameActive = false;
     if (typeof window._loopRunning !== 'undefined') window._loopRunning = false;
+    // ✅ FIX #2: останавливаем поллинг — утечка ресурсов и лишние запросы
+    stopPolling();
     // Закрываем через Telegram WebApp API
     try {
       if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.close === 'function') {
@@ -717,7 +759,11 @@ function saveInstant(data) {
   window.forceReload = function() {
     console.log('🔄 [forceReload] Запрос обновления данных...');
     return serverLoad().then(function(r) {
-      if (r && r.ok && r.save && r.save.data) {
+      if (!r) {
+        console.warn('⚠️ [forceReload] serverLoad вернул null (офлайн?)');
+        return false;
+      }
+      if (r.ok && r.save && r.save.data) {
         console.log('✅ [forceReload] Данные получены, применяем...');
         applySnapshot(r.save.data);
         if (typeof updateHUD === 'function') updateHUD();
@@ -793,7 +839,7 @@ function saveInstant(data) {
 
   function startSyncLoops() {
     if (SYNC.booted) return;
-    SYNC.batchTimer = setInterval(serverSaveBatch, 60000);
+    SYNC.batchTimer = setInterval(serverSaveBatch, 10000); // FIX 3: 10с вместо 30с
 
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) flush();
@@ -832,7 +878,7 @@ function saveInstant(data) {
       G.gold = 0; G.pixr = 0; G.gram = 0;
       G.level = 1; G.xp = 0; G.floor = 1; G.maxFloor = 1; G.killCount = 0;
       G.inventory = []; G.equipped = {};
-      G.upg = { atk:0, def:0, hp:0, spd:0, crit:0, dodge:0, atkSpd:0 };
+      G.upg = { atk:0, def:0, hp:0, spd:0, crit:0, dodge:0, atkSpd:0, critDmg:0 };
       G.bp = { active: false, claimed: [] };
       G.prem = { tier: null, expiresAt: 0 };
       G.skills = {};
@@ -840,6 +886,13 @@ function saveInstant(data) {
       G.potionLv = 0;
       G.dailyTasks = { date: '', seconds: 0, claimed: [] };
       G.specialTasksClaimed = {};
+      G.ore = { core:0, uore:0, rore:0, eore:0, lore:0 };
+      G.runes = { crune:0, urune:0, rrune:0, erune:0, lrune:0 };
+      G.blessStones = 0;
+      G.arenaRating = 1000;
+      G.pvpAttempts = 0; G.pvpAttemptsDate = '';
+      G.pvpRefreshes = 0; G.pvpRefreshDate = '';
+      G.marketUnlocked = false;
     }} catch(e) {}
     if (typeof _invIdCounter !== 'undefined') window._invIdCounter = 0;
     
@@ -907,7 +960,7 @@ function saveInstant(data) {
 //  БУТ — с задержкой
 // ═══════════════════════════════
 
-function boot() {
+  function boot() {
   lsInitStars();
   lsSetStatus('Подключение', 10);
   initTelegram();
@@ -1120,8 +1173,9 @@ function boot() {
             body: JSON.stringify({ initData: TG_INIT, charId: G.charId }),
           });
         } catch (e) {}
+        // FIX: serverSaveInstant удалён — используем saveInstant (дельта через /api/save/delta)
         var snap = serializeState();
-        serverSaveInstant({
+        saveInstant({
           charId: G.charId,
           inventory: snap.inventory,
           equipped: snap.equipped,
@@ -1148,13 +1202,16 @@ function boot() {
   // ═══════════════════════════════
 
   function hookActions() {
+    // Оборачиваем все действия игрока что меняют структурные данные.
+    // FIX #10/#11: INSTANT_FIELDS удалён — используем serializeState() явно.
+    // on* мёртвые хуки удалены — здесь теперь единственный путь для instant-сохранений.
     var instantActions = [
-      'buyUpgrade',
-      'equipItem', 'unequipItem', 'destroyItem', 'refineItem',
+      'buyUpgrade', 'equipItem', 'unequipItem', 'destroyItem', 'refineItem',
       'useSkillBook', 'buyBattlePass', 'claimBpReward', 'buyPrem',
-      'upgPotion', 'goToFloor', 'buyPotions'
+      'upgPotion', 'goToFloor', 'buyPotions',
+      'doCraft', 'doInsertRune'
     ];
-    
+
     instantActions.forEach(function (name) {
       var fn = window[name];
       if (typeof fn !== 'function') return;
@@ -1162,63 +1219,76 @@ function boot() {
         var r = fn.apply(this, arguments);
         try {
           var snap = serializeState();
-          var data = {};
-          INSTANT_FIELDS.forEach(function(field) {
-            if (snap[field] !== undefined) data[field] = snap[field];
+          // Отправляем все структурные поля — сервер примет только из ALLOWED_DELTA_FIELDS
+          saveInstant({
+            inventory:        snap.inventory,
+            equipped:         snap.equipped,
+            upg:              snap.upg,
+            skills:           snap.skills,
+            potionLv:         snap.potionLv,
+            potionThreshold:  snap.potionThreshold,
+            floor:            snap.floor,
+            level:            snap.level,
+            pixr:             snap.pixr,
+            gram:             snap.gram,
+            bp:               snap.bp,
+            prem:             snap.prem,
+            marketUnlocked:   snap.marketUnlocked,
+            ore:              snap.ore,
+            runes:            snap.runes,
+            blessStones:      snap.blessStones,
           });
-          saveInstant(data);
         } catch (e) {}
         return r;
       };
     });
-
-    // ❌ УБРАНО: сохранение при обновлении HUD
-    // var origHUD = window.updateHUD;
-    // if (typeof origHUD === 'function') {
-    //   window.updateHUD = function () {
-    //     var r = origHUD.apply(this, arguments);
-    //     if (SYNC.started) saveToServerDebounced();
-    //     return r;
-    //   };
-    // }
   }
 
   // ═══════════════════════════════
   //  ЭКСПОРТ ДЛЯ ИГРОВЫХ СОБЫТИЙ
   // ═══════════════════════════════
 
-  window.onPixrDrop = function(amount) {
-    G.pixr = (G.pixr || 0) + amount;
-    saveInstant({ pixr: G.pixr });
-  };
-
-  window.onExchangePixr = function() {
-    saveInstant({ pixr: G.pixr, gram: G.gram });
-  };
-
-  window.onItemDrop = function(item) {
-    G.inventory.push(item);
-    saveInstant({ inventory: G.inventory });
-  };
-
-  window.onEquip = function(item) {
-    saveInstant({ equipped: G.equipped });
-  };
-
-  window.onUpgrade = function(upgId, newLevel) {
-    saveInstant({ upg: G.upg });
-  };
-
-  window.onSkillUpgrade = function(skillId, newLevel) {
-    saveInstant({ skills: G.skills });
-  };
-
+  // onLevelUp и onFloorChange вызываются из game.js — оставляем.
+  // Остальные on* хуки (onEquip, onUpgrade, onItemDrop, onPixrDrop и др.) удалены:
+  // они нигде не вызывались из игрового кода — hookActions покрывает те же действия.
   window.onLevelUp = function() {
     saveInstant({ level: G.level, xpNeeded: G.xpNeeded });
   };
 
   window.onFloorChange = function(newFloor) {
     saveInstant({ floor: G.floor, maxFloor: G.maxFloor });
+  };
+
+  // ─────────────────────────────────────────────────────
+  //  FIX #4: Забрать PIXR за проданный лот маркета.
+  //  Вызывается из ui.js вместо прямого fetch к /api/market/claim.
+  //  После успеха синхронизирует G.pixr и SYNC.lastPixr,
+  //  чтобы следующий saveInstant не перетёр серверное значение.
+  // ─────────────────────────────────────────────────────
+  window.claimMarketEarnings = function(listingId) {
+    if (!SYNC.online || !SYNC.serverConfirmed) {
+      return Promise.reject(new Error('offline'));
+    }
+    return fetch(API + '/api/market/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: TG_INIT, listingId: listingId }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r && r.ok) {
+        // ✅ Применяем серверный pixr — предотвращаем гонку с saveInstant
+        G.pixr = r.pixr;
+        SYNC.lastPixr = r.pixr;
+        // Отменяем pending instant если он был с устаревшим pixr
+        if (_instantPending.pixr !== undefined) {
+          _instantPending.pixr = G.pixr;
+        }
+        if (typeof updateHUD === 'function') updateHUD();
+        if (typeof renderWallet === 'function') renderWallet();
+      }
+      return r;
+    });
   };
 
   // ═══════════════════════════════
@@ -1234,10 +1304,10 @@ function boot() {
     window.addEventListener('load', boot);
   }
 
+  // FIX: touch удалён из экспорта — батч работает по setInterval, отдельный триггер не нужен
   window.GameSync = {
     save:        serverSaveBatch,
     flush:       flush,
-    touch:       touch,
     serialize:   serializeState,
     apply:       applySnapshot,
     state:       SYNC,
