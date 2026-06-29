@@ -17,7 +17,7 @@
   var API = (function() {
     var url = new URLSearchParams(window.location.search).get('api') || 
               window.ENV_API_URL || 
-              'https://ghz-production.up.railway.app';
+              'https://tets-production-4fdc.up.railway.app';
     return url.replace(/\/$/, '');
   })();
 
