@@ -2711,6 +2711,7 @@ app.post('/api/market/buy', async (req, res) => {
 
     // Атомарно списываем PIXR у покупателя и начисляем предмет/руду
     let buyerUpdate;
+    let boughtItem;
     if (isOre) {
       const oreKey = 'data.ore.' + listing.item.oreId;
       buyerUpdate = {
@@ -2718,9 +2719,13 @@ app.post('/api/market/buy', async (req, res) => {
         $set: { updatedAt: Date.now() }
       };
     } else {
+      // Переназначаем id чтобы не совпал с предметами покупателя
+      boughtItem = Object.assign({}, listing.item, {
+        id: Date.now() + Math.floor(Math.random() * 1000000)
+      });
       buyerUpdate = {
         $inc: { 'data.pixr': -price },
-        $push: { 'data.inventory': listing.item },
+        $push: { 'data.inventory': boughtItem },
         $set: { updatedAt: Date.now() }
       };
     }
@@ -2757,7 +2762,7 @@ app.post('/api/market/buy', async (req, res) => {
           { tgId: tg.id },
           {
             $inc: { 'data.pixr': price },
-            $pull: { 'data.inventory': { id: listing.item.id } }
+            $pull: { 'data.inventory': { id: boughtItem.id } }
           }
         );
       }
@@ -2783,7 +2788,7 @@ app.post('/api/market/buy', async (req, res) => {
     if (isOre) {
       res.json({ ok: true, item: listing.item, pixr: buyer.data.pixr, ore: buyer.data.ore || {} });
     } else {
-      res.json({ ok: true, item: listing.item, pixr: buyer.data.pixr, inventory: buyer.data.inventory });
+      res.json({ ok: true, item: boughtItem, pixr: buyer.data.pixr, inventory: buyer.data.inventory });
     }
   } catch (e) {
     console.error('❌ [market/buy] error:', e.message);
