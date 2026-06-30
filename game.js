@@ -443,10 +443,7 @@ function update(dt) {
 // ── Смерть монстров — награда ──
 monsters = monsters.filter(m => {
   if (m.hp <= 0) {
-    if (m._attackTimeout) {
-      clearTimeout(m._attackTimeout);
-      m._attackTimeout = null;
-    }
+    if (m._attackTimeout) clearTimeout(m._attackTimeout);
     spawnParticles(m.worldX, m.y, m.color, 12);
     if (m.isBoss) {
       _onBossKilled(m);
