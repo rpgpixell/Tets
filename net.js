@@ -323,6 +323,39 @@ G.equipped = {
   }
 
   // ═══════════════════════════════
+  //  СИНХРОНИЗАЦИЯ ИНВЕНТАРЯ
+  // ═══════════════════════════════
+  // Вызывается после /api/drop и других серверных операций с инвентарём.
+  // Правильно восстанавливает _equipped флаги и G.equipped ссылки.
+  function syncInventoryFromServer(serverInventory) {
+    if (!Array.isArray(serverInventory)) return;
+    // Сбрасываем все флаги
+    G.inventory = serverInventory.map(function(it) {
+      var c = clone(it);
+      c._equipped = false;
+      return c;
+    });
+    // Восстанавливаем invIdCounter
+    G.inventory.forEach(function(i) {
+      if (typeof i.id === 'number' && i.id > _invIdCounter) _invIdCounter = i.id;
+    });
+    // Пересобираем G.equipped — ищем предметы по id, которые были в слотах
+    var prevEqIds = {};
+    EQUIP_SLOTS.forEach(function(slot) {
+      var it = G.equipped[slot];
+      if (it) prevEqIds[slot] = it.id;
+    });
+    G.equipped = { weapon:null, body:null, legs:null, gloves:null, belt:null, ring:null, boots:null, helmet:null };
+    EQUIP_SLOTS.forEach(function(slot) {
+      var id = prevEqIds[slot];
+      if (id == null) return;
+      var it = G.inventory.find(function(i) { return i.id === id; });
+      if (it) { it._equipped = true; G.equipped[slot] = it; }
+    });
+    if (typeof recalcStats === 'function') recalcStats();
+  }
+
+  // ═══════════════════════════════
   //  СЕРВЕРНЫЕ ЗАПРОСЫ
   // ═══════════════════════════════
 
@@ -506,7 +539,7 @@ G.equipped = {
             if (r.sync.gold      !== undefined) G.gold      = r.sync.gold;
             if (r.sync.pixr      !== undefined) G.pixr      = r.sync.pixr;
             if (r.sync.inventory !== undefined) {
-              G.inventory = r.sync.inventory;
+              syncInventoryFromServer(r.sync.inventory);
               if (typeof renderInventory === 'function') renderInventory();
             }
             if (typeof updateHUD === 'function') updateHUD();
@@ -586,7 +619,7 @@ G.equipped = {
             if (r.sync.gold      !== undefined) { G.gold = r.sync.gold; SYNC.lastGold = G.gold; }
             if (r.sync.pixr      !== undefined) { G.pixr = r.sync.pixr; SYNC.lastPixr = G.pixr; }
             if (r.sync.inventory !== undefined) {
-              G.inventory = r.sync.inventory;
+              syncInventoryFromServer(r.sync.inventory);
               if (typeof renderInventory === 'function') renderInventory();
             }
             if (typeof updateHUD    === 'function') updateHUD();
@@ -1306,14 +1339,15 @@ G.equipped = {
 
   // FIX: touch удалён из экспорта — батч работает по setInterval, отдельный триггер не нужен
   window.GameSync = {
-    save:        serverSaveBatch,
-    flush:       flush,
-    serialize:   serializeState,
-    apply:       applySnapshot,
-    state:       SYNC,
-    getTgId:     getTgId,
-    saveInstant: saveInstant,
-    _API:        API,
+    save:          serverSaveBatch,
+    flush:         flush,
+    serialize:     serializeState,
+    apply:         applySnapshot,
+    state:         SYNC,
+    getTgId:       getTgId,
+    saveInstant:   saveInstant,
+    syncInventory: syncInventoryFromServer,
+    _API:          API,
     get _INIT() { return TG_INIT; },
   };
 })();

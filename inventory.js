@@ -154,11 +154,9 @@ function tryDropItem(floor) {
   .then(function(r) { return r.json(); })
   .then(function(data) {
     if (data.ok) {
-      // Используем функцию из net.js для синхронизации
-      if (typeof window.GameSync.syncInventory === 'function') {
+      if (window.GameSync && typeof window.GameSync.syncInventory === 'function') {
         window.GameSync.syncInventory(data.inventory);
       } else {
-        // fallback
         G.inventory = data.inventory;
       }
       if (data.gold !== undefined) G.gold = data.gold;

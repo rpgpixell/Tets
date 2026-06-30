@@ -591,6 +591,9 @@ function _onBossKilled(m) {
   var item = _bossDrop(bossId);
   if (G.inventory.length < 40 && item) {
     G.inventory.push(item);
+    if (window.GameSync && typeof window.GameSync.syncInventory === 'function') {
+      window.GameSync.syncInventory(G.inventory);
+    }
     showDropNotif(item);
   }
 
@@ -835,6 +838,9 @@ const BP_REWARDS = [
         rarity: 'epic', level: 10, stats: stats,
         forClass: st.forClass, classLabel: st.classLabel, classColor: st.classColor };
       G.inventory.push(item);
+      if (window.GameSync && typeof window.GameSync.syncInventory === 'function') {
+        window.GameSync.syncInventory(G.inventory);
+      }
       if (typeof renderInventory === 'function') renderInventory();
     }},
   { lv: 15, iconFn: function() { return '<img src="images/ringe.png" style="width:28px;height:28px;object-fit:contain;image-rendering:pixelated;">'; }, desc: 'Кольцо Lv.10 Epic',
@@ -844,6 +850,9 @@ const BP_REWARDS = [
       var item = { id: ++_invIdCounter, slot: 'ring', name: 'Кольцо битвы',
         icon: itemIcon('ring', 'epic', null), rarity: 'epic', level: 10, stats: stats };
       G.inventory.push(item);
+      if (window.GameSync && typeof window.GameSync.syncInventory === 'function') {
+        window.GameSync.syncInventory(G.inventory);
+      }
       if (typeof renderInventory === 'function') renderInventory();
     }},
   { lv: 20, iconFn: function() { return '<svg width="28" height="28" viewBox="0 0 10 10" fill="none" style="image-rendering:pixelated"><rect x="2" y="0" width="6" height="2" fill="#f5c542"/><rect x="0" y="2" width="10" height="6" fill="#f5c542"/><rect x="2" y="8" width="6" height="2" fill="#f5c542"/><rect x="3" y="2" width="4" height="6" fill="#c8a000"/><rect x="4" y="3" width="2" height="4" fill="#f5c542"/></svg>'; }, desc: '20 000 золота',
@@ -867,6 +876,9 @@ const BP_REWARDS = [
         rarity: 'legend', level: 20, stats: stats,
         forClass: st.forClass, classLabel: st.classLabel, classColor: st.classColor };
       G.inventory.push(item);
+      if (window.GameSync && typeof window.GameSync.syncInventory === 'function') {
+        window.GameSync.syncInventory(G.inventory);
+      }
       if (typeof renderInventory === 'function') renderInventory();
     }},
   { lv: 35, iconFn: function() { return '<svg width="28" height="28" viewBox="0 0 10 10" fill="none" style="image-rendering:pixelated"><rect x="2" y="0" width="6" height="2" fill="#f5c542"/><rect x="0" y="2" width="10" height="6" fill="#f5c542"/><rect x="2" y="8" width="6" height="2" fill="#f5c542"/><rect x="3" y="2" width="4" height="6" fill="#c8a000"/><rect x="4" y="3" width="2" height="4" fill="#f5c542"/></svg>'; }, desc: '100 000 золота',

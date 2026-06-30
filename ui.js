@@ -2218,37 +2218,7 @@ function renderMarketListings(listings, isMy) {
   body.innerHTML = html;
 }
 
-// ── Купить лот ──
-// ── Синхронизация инвентаря с сервера (сохраняет _equipped и G.equipped) ──
-function syncInventoryFromServer(rawInventory) {
-  var SLOTS = ['weapon','body','legs','gloves','boots','helmet','ring','belt'];
-  // Фильтруем руду — она не должна попадать в G.inventory
-  var newInv = (rawInventory || []).filter(function(it) { return !it.isOre; }).map(function(it) {
-    var c = Object.assign({}, it);
-    c._equipped = false;
-    return c;
-  });
-  // Восстанавливаем G.equipped — ищем предметы по id
-  SLOTS.forEach(function(slot) {
-    var cur = G.equipped[slot];
-    if (!cur) return;
-    var found = newInv.find(function(i) { return i.id === cur.id; });
-    if (found) {
-      found._equipped = true;
-      G.equipped[slot] = found;
-    } else {
-      // Предмет не найден в новом инвентаре — НЕ обнуляем слот автоматически,
-      // сохраняем текущий объект чтобы saveInstant не затёр equipped на сервере
-      // Слот обнуляется только явно (unequip, sell)
-    }
-  });
-  G.inventory = newInv;
-  // Пересчитываем статы и CP после любого изменения инвентаря
-  if (typeof recalcStats === 'function') recalcStats();
-  if (typeof updateHUD === 'function') updateHUD();
-}
-
-function buyListing(listingId, price) {
+// ── Купить лот ──function buyListing(listingId, price) {
   if (!confirm('Купить за ' + price + ' PIXR?')) return;
   var API  = window.GameSync._API;
   var init = window.GameSync._INIT;
@@ -2268,10 +2238,10 @@ function buyListing(listingId, price) {
         if (typeof renderInventory === 'function') renderInventory();
         if (typeof renderCraft === 'function') renderCraft();
       } else if (d.inventory) {
-        syncInventoryFromServer(d.inventory);
+        window.GameSync.syncInventory(d.inventory);
         if (typeof renderInventory === 'function') renderInventory();
       } else if (d.item && !d.item.isOre) {
-        syncInventoryFromServer(G.inventory.concat([d.item]));
+        window.GameSync.syncInventory(G.inventory.concat([d.item]));
         if (typeof renderInventory === 'function') renderInventory();
       }
       updateMarketPixrBal();
@@ -2313,7 +2283,7 @@ function cancelListing(listingId) {
         if (typeof renderInventory === 'function') renderInventory();
         if (typeof renderCraft === 'function') renderCraft();
       } else if (d.inventory) {
-        syncInventoryFromServer(d.inventory);
+        window.GameSync.syncInventory(d.inventory);
         if (typeof renderInventory === 'function') renderInventory();
       }
       loadMarketListings();
@@ -2417,7 +2387,7 @@ function confirmSellItem() {
   .then(function(d) {
     if (btn) btn.disabled = false;
     if (d.ok) {
-      syncInventoryFromServer(d.inventory);
+      window.GameSync.syncInventory(d.inventory);
       closeSellModal();
       if (typeof renderInventory === 'function') renderInventory();
       _taskToast('✅ Предмет выставлен на маркет!');
@@ -2446,7 +2416,7 @@ window._handleMarketNotif = function(event, data) {
     _taskToast('💰 Продано: "' + data.itemName + '" · Зайди в Мои лоты чтобы забрать ' + data.earned + ' 💎');
   } else if (event === 'market_expired') {
     _taskToast('⏰ Лот истёк, "' + (data.item && data.item.name) + '" возвращён');
-    if (data.item && !data.item.isOre) { syncInventoryFromServer(G.inventory.concat([data.item])); }
+    if (data.item && !data.item.isOre) { window.GameSync.syncInventory(G.inventory.concat([data.item])); }
     if (data.item && data.item.isOre) {
       if (!G.ore) G.ore = {};
       G.ore[data.item.oreId] = (G.ore[data.item.oreId] || 0) + (data.item.qty || 1);
