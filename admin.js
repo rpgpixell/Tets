@@ -11,7 +11,7 @@ const crypto = require('crypto');
 // ── Конфиг ──
 const ADMIN_CREDENTIALS = {
   admin: {
-    password: process.env.ADMIN_PASSWORD || 'pixel2024',
+    password: process.env.ADMIN_PASSWORD,
     role: 'superadmin'
   }
 };
