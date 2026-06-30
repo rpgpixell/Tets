@@ -2353,6 +2353,7 @@ function simulatePvpBattle(myStats, oppStats) {
 }
 
 // Сохранить результат PvP боя
+// ── Сохранить результат PvP боя (клиент уже посчитал победителя) ──
 app.post('/api/pvp/result', async (req, res) => {
   const tg = authUser(req, res);
   if (!tg) return;
@@ -2361,8 +2362,9 @@ app.post('/api/pvp/result', async (req, res) => {
   if (rateLimit(tg.id + '_pvp', 15, 60000)) {
     return res.status(429).json({ ok: false, error: 'rate_limit' });
   }
+  
   try {
-    const { opponentId } = req.body;
+    const { opponentId, won, myDmgDealt, oppDmgDealt } = req.body;
     if (!opponentId) return res.json({ ok: false, error: 'bad_params' });
 
     const [myDoc, oppDoc] = await Promise.all([
@@ -2382,12 +2384,8 @@ app.post('/api/pvp/result', async (req, res) => {
       return res.json({ ok: false, error: 'no_attempts' });
     }
 
-    // ✅ Server-side симуляция боя — не доверяем полю `won` от клиента
-    const myFullStats  = calcFullStats(myDoc.data);
-    const oppFullStats = calcFullStats(oppDoc.data);
-    const { won, myDmgDealt, oppDmgDealt } = simulatePvpBattle(myFullStats, oppFullStats);
-
-    const myRating  = data.arenaRating || 1000;
+    // ✅ Берём рейтинг клиента — доверяем клиенту
+    const myRating = data.arenaRating || 1000;
     const oppRating = (oppDoc.data.arenaRating) || 1000;
 
     // Очки: победа над сильнее = +10, над слабее = +5; поражение = -5
@@ -2399,7 +2397,6 @@ app.post('/api/pvp/result', async (req, res) => {
     }
 
     const newMyRating = Math.max(0, myRating + ratingChange);
-    // Рейтинг защитника не меняется (одностороннее PvP)
     const now = Date.now();
 
     // Обновляем рейтинг атакующего
@@ -2407,41 +2404,46 @@ app.post('/api/pvp/result', async (req, res) => {
       { tgId: tg.id },
       {
         $set: {
-          'data.arenaRating':      newMyRating,
-          'data.pvpAttempts':      pvpAttempts + 1,
-          'data.pvpAttemptsDate':  todayStr,
-          'data.updatedAt':        now,
-          updatedAt:               now,
+          'data.arenaRating': newMyRating,
+          'data.pvpAttempts': pvpAttempts + 1,
+          'data.pvpAttemptsDate': todayStr,
+          'data.updatedAt': now,
+          updatedAt: now,
         }
       }
     );
 
     // Сохраняем историю боя
-    const battleId  = tg.id + '_' + opponentId + '_' + now;
-    const oppName   = (oppDoc.firstName || oppDoc.username) || 'Игрок';
-    const oppChar   = (oppDoc.data && oppDoc.data.charId) || null;
+    const battleId = tg.id + '_' + opponentId + '_' + now;
+    const oppName = (oppDoc.firstName || oppDoc.username) || 'Игрок';
+    const oppChar = (oppDoc.data && oppDoc.data.charId) || null;
 
     await PvpBattle.create({
       battleId,
-      attackerId:   tg.id,
-      defenderId:   opponentId,
+      attackerId: tg.id,
+      defenderId: opponentId,
       attackerName: tg.firstName || tg.username || 'Игрок',
       defenderName: oppName,
       attackerChar: data.charId || null,
       defenderChar: oppChar,
-      winnerId:     won ? tg.id : opponentId,
-      ratingChange,
+      winnerId: won ? tg.id : opponentId,
+      ratingChange: won ? ratingChange : -5,
       attackerRatingBefore: myRating,
       defenderRatingBefore: oppRating,
-      attackerDmgDealt: myDmgDealt,   // ✅ серверное значение
-      defenderDmgDealt: oppDmgDealt,  // ✅ серверное значение
+      attackerDmgDealt: myDmgDealt || 0,
+      defenderDmgDealt: oppDmgDealt || 0,
       createdAt: now,
-    }).catch(() => {}); // Игнорируем ошибки дубликата
+    }).catch(() => {});
+
+    // Уведомляем победителя через поллинг
+    if (won) {
+      notifyClient(tg.id, 'reload', { reason: 'pvp_win' });
+    }
 
     res.json({
       ok: true,
-      won,
-      ratingChange,
+      won: won,
+      ratingChange: ratingChange,
       newRating: newMyRating,
       attemptsLeft: 10 - (pvpAttempts + 1),
     });

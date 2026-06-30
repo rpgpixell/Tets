@@ -3344,49 +3344,74 @@ function _pvpEndBattle() {
 
   var b = _pvpBattle;
 
-  // Тратим попытку локально (клиентский предпросмотр, сервер подтвердит)
+  // ✅ Определяем победителя на КЛИЕНТЕ (по HP)
+  var won = false;
+  if (b.myHp > 0 && b.oppHp <= 0) {
+    won = true;
+  } else if (b.oppHp > 0 && b.myHp <= 0) {
+    won = false;
+  } else {
+    // Ничья — побеждает тот, кто нанёс больше урона
+    won = b.myDmgDealt >= b.oppDmgDealt;
+  }
+
+  // Тратим попытку локально
   var today = _pvpTodayStr();
   if ((G.pvpAttemptsDate || '') !== today) { G.pvpAttempts = 0; G.pvpAttemptsDate = today; }
   G.pvpAttempts = (G.pvpAttempts || 0) + 1;
 
-  // Отправляем на сервер — сервер сам симулирует бой и определяет победителя
-  var API  = window.GameSync._API;
+  // ✅ Отправляем РЕЗУЛЬТАТ (а не запрос на симуляцию)
+  var API = window.GameSync._API;
   var init = window.GameSync._INIT;
+  
   fetch(API + '/api/pvp/result', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      initData:   init,
+      initData: init,
       opponentId: b.opp.tgId,
-      // ✅ won/myDmg/oppDmg убраны — сервер считает сам
+      won: won,                    // ✅ отправляем результат клиента
+      myDmgDealt: b.myDmgDealt,
+      oppDmgDealt: b.oppDmgDealt
     })
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.ok) {
-      var serverWon = d.won; // ✅ берём результат от сервера
-      G.arenaRating     = d.newRating;
-      G.pvpAttempts     = 10 - (d.attemptsLeft || 0);
+      // Сервер подтверждает результат и обновляет рейтинг
+      G.arenaRating = d.newRating;
+      G.pvpAttempts = 10 - (d.attemptsLeft || 0);
       G.pvpAttemptsDate = today;
+      
+      // Локальное сохранение
       if (window.GameSync) window.GameSync.saveInstant({
         arenaRating: G.arenaRating,
         pvpAttempts: G.pvpAttempts,
         pvpAttemptsDate: G.pvpAttemptsDate,
       });
-      _pvpShowResult(serverWon, d.ratingChange, d.newRating, b.opp.name);
+      
+      // Показываем результат
+      var ratingChange = won ? (d.ratingChange || 5) : -5;
+      _pvpShowResult(won, ratingChange, d.newRating, b.opp.name);
       _pvpClearCache();
     } else {
-      // При ошибке сервера — показываем нейтральный результат без изменения рейтинга
+      // Ошибка сервера — показываем локальный результат без изменения рейтинга
       if (window.GameSync) window.GameSync.saveInstant({
         pvpAttempts: G.pvpAttempts,
         pvpAttemptsDate: G.pvpAttemptsDate,
       });
-      _pvpShowResult(false, 0, G.arenaRating, b.opp.name);
+      var fallbackChange = won ? 5 : -5;
+      _pvpShowResult(won, fallbackChange, G.arenaRating, b.opp.name);
     }
   })
   .catch(function() {
-    // Нет сети — показываем без изменения рейтинга
-    _pvpShowResult(false, 0, G.arenaRating, b.opp.name);
+    // Нет сети — показываем локальный результат
+    if (window.GameSync) window.GameSync.saveInstant({
+      pvpAttempts: G.pvpAttempts,
+      pvpAttemptsDate: G.pvpAttemptsDate,
+    });
+    var fallbackChange = won ? 5 : -5;
+    _pvpShowResult(won, fallbackChange, G.arenaRating, b.opp.name);
   });
 }
 
