@@ -2898,13 +2898,28 @@ function _pvpUpdate(dt) {
   b.timeLeft -= dt;
   if (b.timeLeft <= 0) { b.timeLeft = 0; _pvpEndBattle(); return; }
 
-  // Накапливаем время для анимации (как spriteRunTime в render.js)
-  b.mySpriteTime  += dt;
-  b.oppSpriteTime += dt;
+  // Накапливаем время для анимации ТОЛЬКО когда персонаж в покое
+if (b.myAnimState === 'idle') {
+    b.mySpriteTime += dt;
+}
+b.oppSpriteTime += dt;
 
-  if (b.myAnimState  === 'atk') { b.myAnimTimer  -= dt; if (b.myAnimTimer  <= 0) { b.myAnimState  = 'idle'; } }
-  if (b.oppAnimState === 'atk') { b.oppAnimTimer -= dt; if (b.oppAnimTimer <= 0) { b.oppAnimState = 'idle'; } }
-
+  // ── Анимация игрока ──
+if (b.myAnimState === 'atk') {
+    b.myAnimTimer -= dt;
+    if (b.myAnimTimer <= 0) {
+        b.myAnimState = 'idle';
+        b.myAnimTimer = 0; // ✅ сбрасываем в ноль, а не в отрицательное
+    }
+}
+// ── Анимация противника ──
+if (b.oppAnimState === 'atk') {
+    b.oppAnimTimer -= dt;
+    if (b.oppAnimTimer <= 0) {
+        b.oppAnimState = 'idle';
+        b.oppAnimTimer = 0; // ✅ сбрасываем в ноль
+    }
+}
   // Дебаффы/баффы
   if (b._oppDefDebuffTimer > 0) { b._oppDefDebuffTimer -= dt; if (b._oppDefDebuffTimer <= 0) { b._oppDefDebuff = 0; } }
   if (b._myDefBuffTimer    > 0) { b._myDefBuffTimer     -= dt; if (b._myDefBuffTimer    <= 0) { b._myDefBuff = 0;    } }
@@ -2926,23 +2941,26 @@ function _pvpUpdate(dt) {
   var myAtkInterval = Math.max(0.4, 2.5 / myAtkSpd);
   b.myAtkTimer += dt;
   if (b.myAtkTimer >= myAtkInterval) {
-    b.myAtkTimer = 0;
-    // Проверка dodge противника
-    if (Math.random() * 100 < (b.oppDodge || 5)) {
-      _pvpAddDmgPop('DODGE', window.innerWidth * 0.65, window.innerHeight * 0.45, '#88aaff');
-      _pvpLogDmg('Противник: DODGE', false);
-    } else {
-      var myEffCrit = (b.myCrit || 5) + (b._myCritBuff || 0);
-      var oppEffDef = Math.floor((b.oppDef || 5) * (1 - (b._oppDefDebuff || 0)));
-      var myEffCritDmg = (typeof effectiveCritDmg === 'function') ? effectiveCritDmg() : 1.8;
-      var res = _pvpCalcDmg(b.myAtk, oppEffDef, myEffCrit, myEffCritDmg);
-      b.oppHp = Math.max(0, b.oppHp - res.dmg);
-      b.myDmgDealt += res.dmg;
-      b.myAnimState = 'atk'; b.myAnimTimer = 0.4;
-      _pvpAddDmgPop((res.crit ? '💥 ' : '') + res.dmg, window.innerWidth * 0.65, window.innerHeight * 0.45, res.crit ? '#f5c542' : '#ff6060');
-      _pvpLogDmg('Вы: -' + res.dmg + (res.crit ? ' КРИТ' : ''), true);
+    // ✅ Обрабатываем все пропущенные тики
+    while (b.myAtkTimer >= myAtkInterval) {
+        b.myAtkTimer -= myAtkInterval;
+        // Проверка dodge противника
+        if (Math.random() * 100 < (b.oppDodge || 5)) {
+            _pvpAddDmgPop('DODGE', window.innerWidth * 0.65, window.innerHeight * 0.45, '#88aaff');
+            _pvpLogDmg('Противник: DODGE', false);
+        } else {
+            var myEffCrit = (b.myCrit || 5) + (b._myCritBuff || 0);
+            var oppEffDef = Math.floor((b.oppDef || 5) * (1 - (b._oppDefDebuff || 0)));
+            var myEffCritDmg = (typeof effectiveCritDmg === 'function') ? effectiveCritDmg() : 1.8;
+            var res = _pvpCalcDmg(b.myAtk, oppEffDef, myEffCrit, myEffCritDmg);
+            b.oppHp = Math.max(0, b.oppHp - res.dmg);
+            b.myDmgDealt += res.dmg;
+            b.myAnimState = 'atk'; b.myAnimTimer = 0.4;
+            _pvpAddDmgPop((res.crit ? '💥 ' : '') + res.dmg, window.innerWidth * 0.65, window.innerHeight * 0.45, res.crit ? '#f5c542' : '#ff6060');
+            _pvpLogDmg('Вы: -' + res.dmg + (res.crit ? ' КРИТ' : ''), true);
+        }
     }
-  }
+}
 
   // ── Атака противника (не атакует если заморожен) ──
   if (!b._oppFrozen) {
@@ -3245,28 +3263,33 @@ function _pvpRender() {
   var IDLE_FPS_PVP = 8, ATK_FPS_PVP = 20;
 
   // ── Рисуем ИГРОКА ──
-  if (G_CHAR && typeof spriteRun !== 'undefined') {
+if (G_CHAR && typeof spriteRun !== 'undefined') {
     var mySpr, myFr, myFW, myFH;
-    if (b.myAnimState === 'atk') {
-      mySpr = spriteAtk;
-      var _AF  = window.ATK_FRAMES_CUR  || 8;
-      var _AFW = window.ATK_FW_CUR      || 128;
-      // Кадр атаки: прогресс от 0 до 1 за время анимации (как в render.js)
-      myFr = Math.min(_AF - 1, Math.floor((1 - b.myAnimTimer / 0.4) * _AF));
-      myFW = _AFW; myFH = 128;
+    // ✅ Защита: если анимация атаки закончилась — принудительно переключаем в idle
+    if (b.myAnimState === 'atk' && b.myAnimTimer > 0) {
+        mySpr = spriteAtk;
+        var _AF  = window.ATK_FRAMES_CUR  || 8;
+        var _AFW = window.ATK_FW_CUR      || 128;
+        myFr = Math.min(_AF - 1, Math.floor((1 - b.myAnimTimer / 0.4) * _AF));
+        myFW = _AFW;
+        myFH = 128;
     } else {
-      mySpr = spriteIdle;
-      var _IF  = window.IDLE_FRAMES_CUR || 7;
-      var _IFW = window.IDLE_FW_CUR     || 128;
-      // Кадр idle: по времени * IDLE_FPS (как spriteRunTime * IDLE_FPS в render.js)
-      myFr = Math.floor(b.mySpriteTime * IDLE_FPS_PVP) % _IF;
-      myFW = _IFW; myFH = 128;
+        // ✅ Принудительный сброс состояния
+        if (b.myAnimState === 'atk') {
+            b.myAnimState = 'idle';
+            b.myAnimTimer = 0;
+        }
+        mySpr = spriteIdle;
+        var _IF  = window.IDLE_FRAMES_CUR || 7;
+        var _IFW = window.IDLE_FW_CUR     || 128;
+        myFr = Math.floor(b.mySpriteTime * IDLE_FPS_PVP) % _IF;
+        myFW = _IFW;
+        myFH = 128;
     }
     if (mySpr && mySpr.complete && mySpr.naturalWidth > 0) {
-      ctx2.drawImage(mySpr, myFr * myFW, 0, myFW, myFH, myX - SPRITE_W / 2, sprY, SPRITE_W, SPRITE_H);
+        ctx2.drawImage(mySpr, myFr * myFW, 0, myFW, myFH, myX - SPRITE_W / 2, sprY, SPRITE_W, SPRITE_H);
     }
-  }
-
+}
   // ── Рисуем ПРОТИВНИКА (отзеркаленный) ──
   var opp = b.opp;
   if (opp && opp.charId) {
