@@ -1,0 +1,21 @@
+# Railway deployment configuration
+
+services:
+  api:
+    build: .
+    environment:
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongodb
+
+  mongodb:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_DATABASE: pixel-rpg
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:

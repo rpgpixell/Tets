@@ -3,6 +3,7 @@ import cors from 'cors';
 import { config } from './config/index';
 import { logger } from './utils/logger';
 import { connectDB } from './db/index';
+import { initBot } from './bot/index';
 
 // Middleware
 import { errorHandler, asyncHandler } from './middleware/errorHandler';
@@ -19,12 +20,13 @@ import apiRoutes from './routes/index';
 import healthRoutes from './routes/health';
 import systemRoutes from './routes/system';
 import walletRoutes from './routes/wallet';
+import adminRoutes from './routes/admin';
 
 const app: Express = express();
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // MIDDLEWARE SETUP
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 // Security headers
 app.use(getHelmetMiddleware());
@@ -45,9 +47,9 @@ app.use(globalLimiter);
 // Request logging
 app.use(requestLogger);
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ROUTES
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 // Health & Status
 app.use('/', healthRoutes);
@@ -58,6 +60,7 @@ app.use('/status', systemRoutes);
 app.use('/api', apiRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/system', systemRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
@@ -68,29 +71,38 @@ app.use((req: Request, res: Response) => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ERROR HANDLING
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 app.use(errorHandler);
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════���═══════════════════════════════════════════════════════════════════════════════════
 // SERVER STARTUP
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 async function startServer(): Promise<void> {
   try {
     logger.info('[Server] Starting Pixel RPG API v2.0');
+    logger.info(`[Server] Environment: ${config.env}`);
 
     // Connect to database
     await connectDB();
+
+    // Initialize Telegram Bot
+    try {
+      initBot();
+      logger.info('[Server] ✅ Telegram Bot started');
+    } catch (err) {
+      logger.warn('[Server] ⚠️ Telegram Bot failed to start', { error: err });
+    }
 
     // Start listening
     const port = config.port;
     app.listen(port, '0.0.0.0', () => {
       logger.info(`[Server] ✅ Listening on port ${port}`);
-      logger.info(`[Server] Environment: ${config.env}`);
-      logger.info(`[Server] Database: ${config.mongodb.uri.replace(/:[^:]*@/, ':***@')}`);
+      logger.info(`[Server] URL: http://0.0.0.0:${port}`);
+      logger.info('[Server] 🎮 API Ready!');
     });
   } catch (err) {
     logger.error('[Server] Failed to start', { error: err });
@@ -98,9 +110,9 @@ async function startServer(): Promise<void> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // GRACEFUL SHUTDOWN
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 process.on('SIGINT', async () => {
   logger.info('[Server] SIGINT received, gracefully shutting down...');
