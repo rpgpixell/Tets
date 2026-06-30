@@ -2898,11 +2898,13 @@ function _pvpUpdate(dt) {
   b.timeLeft -= dt;
   if (b.timeLeft <= 0) { b.timeLeft = 0; _pvpEndBattle(); return; }
 
-  // Накапливаем время для анимации ТОЛЬКО когда персонаж в покое
+// Накапливаем время для анимации ТОЛЬКО когда персонаж в покое
 if (b.myAnimState === 'idle') {
     b.mySpriteTime += dt;
 }
-b.oppSpriteTime += dt;
+if (b.oppAnimState === 'idle') {
+    b.oppSpriteTime += dt;
+}
 
   // ── Анимация игрока ──
 if (b.myAnimState === 'atk') {
@@ -3291,41 +3293,44 @@ if (G_CHAR && typeof spriteRun !== 'undefined') {
     }
 }
   // ── Рисуем ПРОТИВНИКА (отзеркаленный) ──
-  var opp = b.opp;
-  if (opp && opp.charId) {
+var opp = b.opp;
+if (opp && opp.charId) {
     var oppChar = CHARS[opp.charId];
     if (oppChar) {
-      if (!_pvpOppImgs) _pvpOppImgs = {};
-      var oppIdleKey = opp.charId + '_idle';
-      var oppAtkKey  = opp.charId + '_atk';
-      if (!_pvpOppImgs[oppIdleKey]) {
-        _pvpOppImgs[oppIdleKey] = new Image();
-        _pvpOppImgs[oppIdleKey].src = oppChar.idleSrc;
-        _pvpOppImgs[oppAtkKey]  = new Image();
-        _pvpOppImgs[oppAtkKey].src  = oppChar.atkSrc;
-      }
-      var isOppAtk   = b.oppAnimState === 'atk';
-      var oppSpr     = _pvpOppImgs[isOppAtk ? oppAtkKey : oppIdleKey];
-      var oppFrCount = isOppAtk ? (oppChar.atkFrames || 8) : (oppChar.idleFrames || 7);
-      var oppFW      = isOppAtk ? (oppChar.atkFW    || 128) : (oppChar.idleFW   || 128);
-      var oppFr;
-      if (isOppAtk) {
-        // Кадр атаки: прогресс как у игрока
-        oppFr = Math.min(oppFrCount - 1, Math.floor((1 - b.oppAnimTimer / 0.4) * oppFrCount));
-      } else {
-        // Кадр idle: по времени * IDLE_FPS
-        oppFr = Math.floor(b.oppSpriteTime * IDLE_FPS_PVP) % oppFrCount;
-      }
-
-      ctx2.save();
-      ctx2.translate(oppX + SPRITE_W / 2, 0);
-      ctx2.scale(-1, 1);
-      if (oppSpr && oppSpr.complete && oppSpr.naturalWidth > 0) {
-        ctx2.drawImage(oppSpr, oppFr * oppFW, 0, oppFW, 128, 0, sprY, SPRITE_W, SPRITE_H);
-      }
-      ctx2.restore();
+        if (!_pvpOppImgs) _pvpOppImgs = {};
+        var oppIdleKey = opp.charId + '_idle';
+        var oppAtkKey  = opp.charId + '_atk';
+        if (!_pvpOppImgs[oppIdleKey]) {
+            _pvpOppImgs[oppIdleKey] = new Image();
+            _pvpOppImgs[oppIdleKey].src = oppChar.idleSrc;
+            _pvpOppImgs[oppAtkKey]  = new Image();
+            _pvpOppImgs[oppAtkKey].src  = oppChar.atkSrc;
+        }
+        // ✅ Защита: если анимация атаки закончилась — принудительно переключаем в idle
+        var isOppAtk = (b.oppAnimState === 'atk' && b.oppAnimTimer > 0);
+        var oppSpr     = _pvpOppImgs[isOppAtk ? oppAtkKey : oppIdleKey];
+        var oppFrCount = isOppAtk ? (oppChar.atkFrames || 8) : (oppChar.idleFrames || 7);
+        var oppFW      = isOppAtk ? (oppChar.atkFW    || 128) : (oppChar.idleFW   || 128);
+        var oppFr;
+        if (isOppAtk) {
+            oppFr = Math.min(oppFrCount - 1, Math.floor((1 - b.oppAnimTimer / 0.4) * oppFrCount));
+        } else {
+            // ✅ Принудительный сброс состояния противника
+            if (b.oppAnimState === 'atk') {
+                b.oppAnimState = 'idle';
+                b.oppAnimTimer = 0;
+            }
+            oppFr = Math.floor(b.oppSpriteTime * IDLE_FPS_PVP) % oppFrCount;
+        }
+        ctx2.save();
+        ctx2.translate(oppX + SPRITE_W / 2, 0);
+        ctx2.scale(-1, 1);
+        if (oppSpr && oppSpr.complete && oppSpr.naturalWidth > 0) {
+            ctx2.drawImage(oppSpr, oppFr * oppFW, 0, oppFW, 128, 0, sprY, SPRITE_W, SPRITE_H);
+        }
+        ctx2.restore();
     }
-  }
+}
 
   // HP текст над бойцами
   ctx2.font = 'bold 11px Courier New';
