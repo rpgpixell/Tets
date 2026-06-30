@@ -2898,13 +2898,9 @@ function _pvpUpdate(dt) {
   b.timeLeft -= dt;
   if (b.timeLeft <= 0) { b.timeLeft = 0; _pvpEndBattle(); return; }
 
-// Накапливаем время для анимации ТОЛЬКО когда персонаж в покое
-if (b.myAnimState === 'idle') {
-    b.mySpriteTime += dt;
-}
-if (b.oppAnimState === 'idle') {
-    b.oppSpriteTime += dt;
-}
+// Накапливаем время для анимации ВСЕГДА (чтобы анимация не замирала при атаке)
+b.mySpriteTime += dt;
+b.oppSpriteTime += dt;
 
   // ── Анимация игрока ──
 if (b.myAnimState === 'atk') {
