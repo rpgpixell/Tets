@@ -1412,7 +1412,7 @@ let _csSelected      = null;
 let _csParticleTimer = null;
 let _csSpriteTimers  = {};
 let _csIdleImgs      = {};
-let G_CHAR           = null;
+// G_CHAR теперь объявлена глобально в data.js (загружается первым)
 
 function selectChar(id) {
   // ✅ Проверка на авторизацию
@@ -2218,7 +2218,8 @@ function renderMarketListings(listings, isMy) {
   body.innerHTML = html;
 }
 
-// ── Купить лот ──function buyListing(listingId, price) {
+// ── Купить лот ──
+function buyListing(listingId, price) {
   if (!confirm('Купить за ' + price + ' PIXR?')) return;
   var API  = window.GameSync._API;
   var init = window.GameSync._INIT;

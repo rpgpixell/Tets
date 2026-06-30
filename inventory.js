@@ -124,6 +124,9 @@ function tryDropSkillBook(floor) {
     classColor: skClass ? classColors[skClass] : null,
   };
   G.inventory.push(book);
+  if (window.GameSync && typeof window.GameSync.syncInventory === 'function') {
+    window.GameSync.syncInventory(G.inventory);
+  }
   showDropNotif(book);
   if (activeTab === 'inv') renderInventory();
 }
@@ -505,6 +508,9 @@ function removeBooksFromInv(skillId, count) {
     if (i.isSkillBook && i.bookSkillId === skillId && removed < count) { removed++; return false; }
     return true;
   });
+  if (window.GameSync && typeof window.GameSync.syncInventory === 'function') {
+    window.GameSync.syncInventory(G.inventory);
+  }
 }
 
 // inventory.js ~ строка 370
